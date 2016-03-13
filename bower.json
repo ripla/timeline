@@ -1,0 +1,34 @@
+{
+  "name": "project-timeline",
+  "authors": [
+    "Risto Yrjänä <risto@vaadin.com>"
+  ],
+  "description": "Simple timeline management tool for projects",
+  "main": "",
+  "moduleType": [],
+  "keywords": [
+    "timeline",
+    "vaadin",
+    "projects"
+  ],
+  "license": "Apache 2",
+  "homepage": "",
+  "private": true,
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "vaadin-core-elements": "^0.3.0",
+    "vaadin-charts": "^3.0.0-beta1",
+    "vaadin-date-picker": "^1.0.0-alpha2",
+    "iron-form": "PolymerElements/iron-form#^1.0.15",
+    "paper-input": "PolymerElements/paper-input#^1.1.8",
+    "paper-button": "PolymerElements/paper-button#^1.0.11",
+    "iron-localstorage": "PolymerElements/iron-localstorage#^1.0.5",
+    "polymer": "Polymer/polymer#^1.3.1"
+  }
+}

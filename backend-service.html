@@ -1,0 +1,126 @@
+<link rel="import" href="bower_components/polymer/polymer.html">
+<link rel="import"
+      href="bower_components/iron-localstorage/iron-localstorage.html">
+
+<script type="text/javascript" src="date-fi-FI.js"></script>
+
+<!-- An element that provides data on notes related to projects.
+     The data contains a list of project names. Each project name is linked
+     in to an array of note objects. Each note object consists of two fields,
+     date of the note and the text contents.
+ -->
+<dom-module id="backend-service">
+
+    <template>
+        <iron-localstorage
+                name="project-timeline-storage"
+                value="{{data}}"></iron-localstorage>
+    </template>
+
+    <script>
+        Polymer({
+            is: "backend-service",
+
+            properties: {
+                data: {
+                    type: Object,
+                    notify: true
+
+                }
+            },
+
+            listeners: {
+                'iron-localstorage-load-empty': '_initializeData'
+            },
+
+            /**
+             * Add a new note. Data is synchronized automatically and listeners
+             * notified.
+             *
+             * @param project non-empty name of the project
+             * @param note non-empty contents of the note
+             * @param date note date in Unix time format (ms from Epoch)
+             */
+            addNote: function (project, note, date) {
+                if (!this.data[project]) {
+                    this.set('data.' + project, []);
+                }
+
+                this.push('data.' + project, {
+                    note: note,
+                    date: date
+                });
+            },
+
+            /**
+             *
+             * @returns {Object} Returns an object with project names as keys
+             *                   to an array of note objects. Those note objects
+             *                   have note and a date fields. The note arrays
+             *                   are sorted by date.
+             */
+            getProjectNotes: function () {
+                for (var project in this.data) {
+                    if (this.data.hasOwnProperty(project)) {
+                        this.data[project].sort(this._noteDateComparator);
+                    }
+                }
+
+                return this.data;
+            },
+
+            /**
+             * Retrieve all the notes in all the projects
+             *
+             * @returns {Array} all known note objects in one, sorted array
+             */
+            getAllNotes: function () {
+                var allNotes = [];
+                for (var project in this.data) {
+                    if (this.data.hasOwnProperty(project)) {
+                        for (var i = 0; i < this.data[project].length; i++) {
+                            allNotes.push(this.data[project][i]);
+                        }
+                    }
+                }
+
+                allNotes.sort(this._noteDateComparator);
+
+                return allNotes;
+            },
+
+            /**
+             * In case of an empty local storage, initialize with mock data
+             * @private
+             */
+            _initializeData: function () {
+                this.data = {};
+                this.data["Test project 1"] = [{
+                    note: "We decided to start on doing XYZ",
+                    date: new Date().last().december().getTime()
+                }, {
+                    note: "Continue working on XYZ. Decided to do ABC as well.",
+                    date: new Date().last().january().getTime()
+                }, {
+                    note: "Work on XYZ stopped as ABC takes all our time.",
+                    date: new Date().last().february().getTime()
+                }];
+            },
+
+            /**
+             * Compare notes according to their date. Used for array.sort
+             *
+             * @private
+             */
+            _noteDateComparator: function (left, right) {
+                if (left.date < right.date) {
+                    return -1;
+                }
+                if (left.date > right.date) {
+                    return 1;
+                }
+                return 0;
+            }
+        });
+    </script>
+</dom-module>
