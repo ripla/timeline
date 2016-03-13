@@ -45,6 +45,8 @@
                      use-html="true"
                      x-date-format="%d.%m.%Y"></tooltip>
 
+            <legend enabled="true"></legend>
+
             <x-axis type="datetime"
                     min-tick-interval="86400000"
                     crosshair="false">
@@ -249,7 +251,7 @@
                     newArray.push({
                         x: backendDataItem.date,
                         name: backendDataItem.note,
-                        y: Math.random()
+                        y: Math.random() + 1
                     });
                 }
 
