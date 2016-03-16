@@ -48,7 +48,8 @@
 
                 this.push('data.' + project, {
                     note: note,
-                    date: date
+                    date: date,
+                    noteId: this._guid() //not really random, for testing
                 });
             },
 
@@ -89,22 +90,29 @@
                 return allNotes;
             },
 
+            updateNote: function (id, project, note, noteTime) {
+                var notes = this.data[project];
+                for (var i = 0; i < notes.length; i++) {
+                    if (notes[i].noteId == id) {
+                        var dataPath = 'data.' + project + '.' + i;
+                        this.set(dataPath, {
+                            note: note,
+                            noteTime: noteTime,
+                            noteId: id
+                        });
+                    }
+                }
+            },
+
             /**
              * In case of an empty local storage, initialize with mock data
              * @private
              */
             _initializeData: function () {
                 this.data = {};
-                this.data["Test project 1"] = [{
-                    note: "We decided to start on doing XYZ",
-                    date: new Date().last().december().getTime()
-                }, {
-                    note: "Continue working on XYZ. Decided to do ABC as well.",
-                    date: new Date().last().january().getTime()
-                }, {
-                    note: "Work on XYZ stopped as ABC takes all our time.",
-                    date: new Date().last().february().getTime()
-                }];
+                this.addNote("Test project 1", "We decided to start on doing XYZ", new Date().last().december().getTime());
+                this.addNote("Test project 1", "Continue working on XYZ. Decided to do ABC as well.", new Date().last().january().getTime());
+                this.addNote("Test project 1", "Work on XYZ stopped as ABC takes all our time.", new Date().last().february().getTime());
             },
 
             /**
@@ -120,6 +128,17 @@
                     return 1;
                 }
                 return 0;
+            },
+
+            _guid: function () {
+                function s4() {
+                    return Math.floor((1 + Math.random()) * 0x10000)
+                            .toString(16)
+                            .substring(1);
+                }
+
+                return s4() + s4() + '-' + s4() + '-' + s4() + '-' +
+                        s4() + '-' + s4() + s4() + s4();
             }
         });
     </script>

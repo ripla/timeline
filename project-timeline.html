@@ -2,38 +2,68 @@
 <link rel="import" href="bower_components/iron-form/iron-form.html">
 <link rel="import" href="bower_components/paper-button/paper-button.html">
 <link rel="import" href="bower_components/paper-input/paper-input.html">
+<link rel="import" href="bower_components/paper-input/paper-textarea.html">
+
 <link href="bower_components/vaadin-date-picker/vaadin-date-picker.html"
       rel="import">
 <link rel="import"
       href="bower_components/vaadin-charts/vaadin-column-chart.html">
+<link rel="import" href="bower_components/vaadin-icons/vaadin-icons.html">
 
 <link rel="import" href="backend-service.html">
 
 <script type="text/javascript" src="date-fi-FI.js"></script>
 
 <dom-module id="project-timeline">
+    <style is="custom-style">
+
+        paper-button#add {
+            background-color: var(--paper-blue-500);
+            color: white;
+        }
+
+        paper-button.cancel {
+            color: var(--paper-red-300);
+        }
+
+        paper-button#submit {
+            background-color: var(--paper-green-500);
+            color: white;
+        }
+
+        paper-button#submit {
+            background-color: var(--paper-green-500);
+            color: white;
+        }
+
+        paper-button#submit[disabled] {
+            background-color: var(--paper-grey-500);
+            color: white;
+        }
+
+        #formcontainer {
+            display: flex;
+            width: 100%;
+            justify-content: center;
+        }
+
+        form#form {
+            width: 50%;
+        }
+
+        #form #buttons {
+            display: flex;
+            justify-content: flex-end;
+        }
+    </style>
     <template>
         <backend-service id="backend" data="{{backendData}}"></backend-service>
 
-        <form is="iron-form" id="form">
-            <paper-input name="project"
-                         label="Project name">
-            </paper-input>
-
-            <paper-input name="note"
-                         label="Note">
-            </paper-input>
-
-            <vaadin-date-picker name="noteDate"
-                                id="noteDate"
-                                label="Note date">
-
-            </vaadin-date-picker>
-            <paper-button raised on-click="submitForm">Submit</paper-button>
-        </form>
-
-        <vaadin-column-chart timeline id="timelineChart">
+        <vaadin-column-chart timeline id="timelineChart"
+                             on-point-click="_pointClicked">
             <chart animation="true"></chart>
+
+            <title>Project timeline</title>
 
             <tooltip header-format=""
                      point-formatter="function() {
@@ -55,7 +85,7 @@
             <y-axis visible="false"></y-axis>
 
             <plot-options>
-                <column point-width="2"></column>
+                <column point-width="15"></column>
             </plot-options>
 
             <range-selector enabled="true"
@@ -73,6 +103,52 @@
 
         </vaadin-column-chart>
 
+        <paper-button raised
+                      on-click="_addNote"
+                      id="add">
+            <iron-icon icon="vaadin-icons:plus"></iron-icon>
+            Add note
+        </paper-button>
+
+        <div id="formcontainer">
+            <form is="iron-form" id="form" style="display: none"
+                  on-change="_formChanged">
+
+                <input name="id" type="hidden">
+
+                <paper-input name="project"
+                             id="formNoteProject"
+                             label="Project name"
+                             required>
+                </paper-input>
+
+                <paper-textarea name="note"
+                                id="formNoteContent"
+                                label="Note"
+                                required>
+                </paper-textarea>
+
+                <vaadin-date-picker name="noteDate"
+                                    id="formNoteDate"
+                                    label="Note date"
+                                    required>
+                </vaadin-date-picker>
+
+                <div id="buttons">
+                    <paper-button on-click="_cancelForm"
+                                  class="cancel">
+                        Cancel
+                    </paper-button>
+                    <paper-button raised
+                                  disabled
+                                  on-click="_submitForm"
+                                  id="submit">
+                        <iron-icon icon="vaadin-icons:check"></iron-icon>
+                        Submit
+                    </paper-button>
+                </div>
+            </form>
+        </div>
     </template>
 
 
@@ -101,16 +177,35 @@
             /**
              * Submit the add note form to the backend.
              */
-            submitForm: function () {
+            _submitForm: function () {
                 if (this.$.form.validate()) {
                     var formData = this.$.form.serialize();
 
-                    //TODO debug, remove
-                    console.log("Submitting: " + JSON.stringify(formData));
+                    if (!formData.id || "" == formData.id) {
 
-                    this.$.backend.addNote(formData.project, formData.note, Date.parse(formData.noteDate).getTime());
+                        //TODO debug, remove
+                        console.log("Adding: " + JSON.stringify(formData));
+
+                        this.$.backend.addNote(formData.project, formData.note, Date.parse(formData.noteDate).getTime());
+
+                    } else {
+                        //TODO debug, remove
+                        console.log("Modifying: " + JSON.stringify(formData));
+
+                        this.$.backend.updateNote(formData.id, formData.project, formData.note, Date.parse(formData.noteDate).getTime());
+
+                    }
+
                     this.$.form.reset();
+                    this.$.add.style.display = "";
+                    this.$.form.style.display = "none";
                 }
+            },
+
+            _cancelForm: function () {
+                this.$.form.reset();
+                this.$.add.style.display = "";
+                this.$.form.style.display = "none";
             },
 
             /**
@@ -122,7 +217,7 @@
              */
             _createDataSeriesElement: function (name) {
                 var dsElement = document.createElement('data-series');
-                dsElement.setAttribute('id', name);
+                dsElement.setAttribute('id', this._getProjectNameAsId(name));
                 dsElement.setAttribute('name', name);
                 return dsElement;
             },
@@ -181,6 +276,7 @@
                 var allIsNewRegexp = /^backendData$/;
                 var newProjectRegexp = /^backendData\.((\w|\s)*)$/;
                 var newNoteRegexp = /^backendData\.(.*)\.splices$/;
+                var noteUpdateRegexp = /^backendData\.(.*)\.#(\d*)$/;
 
                 var chart = this.$.timelineChart;
 
@@ -219,7 +315,23 @@
                     var projectNoteArray = valueChangeEvent.value.indexSplices[0].object;
                     var mappedData = this._mapBackendProjectData(projectNoteArray);
 
-                    var dataSeriesElement = Polymer.dom(chart).querySelector('#' + existingProjectName);
+                    var dataSeriesElement = Polymer.dom(chart).querySelector('#' + this._getProjectNameAsId(existingProjectName));
+                    var existingSeriesDataElement = Polymer.dom(dataSeriesElement).querySelector('data');
+                    if (existingSeriesDataElement) {
+                        dataSeriesElement.removeChild(existingSeriesDataElement);
+                    }
+
+                    var newDataElement = this._createDataElement(mappedData);
+                    Polymer.dom(dataSeriesElement).appendChild(newDataElement);
+                } else if (noteUpdateRegexp.test(valueChangeEvent.path)) {
+                    //old note updated, update whole series
+                    var existingProjectName = noteUpdateRegexp.exec(valueChangeEvent.path)[1];
+                    // TODO update just one note instead of whole array?
+                    // var noteIndex = noteUpdateRegexp.exec(valueChangeEvent.path)[2];
+                    var projectNoteArray = valueChangeEvent.base[existingProjectName];
+                    var mappedData = this._mapBackendProjectData(projectNoteArray);
+
+                    var dataSeriesElement = Polymer.dom(chart).querySelector('#' + this._getProjectNameAsId(existingProjectName));
                     var existingSeriesDataElement = Polymer.dom(dataSeriesElement).querySelector('data');
                     if (existingSeriesDataElement) {
                         dataSeriesElement.removeChild(existingSeriesDataElement);
@@ -251,13 +363,48 @@
                     newArray.push({
                         x: backendDataItem.date,
                         name: backendDataItem.note,
-                        y: Math.random() + 1
+                        y: Math.random() + 1,
+                        noteId: backendDataItem.noteId
                     });
                 }
 
                 return newArray;
-            }
+            },
 
+            _addNote: function () {
+                this.$.add.style.display = "none";
+                this.$.form.style.display = "";
+            },
+
+            _editNote: function (id, projectName, noteDate, noteText) {
+                this.$.add.style.display = "none";
+                this.$.form.style.display = "";
+                this.$.form.id.value = id;
+                this.$.formNoteProject.value = projectName;
+                this.$.formNoteDate.value = noteDate.toString("yyyy-MM-dd");
+                this.$.formNoteContent.value = noteText;
+            },
+
+            _pointClicked: function (event) {
+                console.log("Click!");
+                console.log(event);
+
+                this._editNote(event.detail.point.noteId, event.detail.point.series.name, new Date(event.detail.point.x), event.detail.point.name);
+            },
+
+            _getProjectNameAsId: function (projectName) {
+                function camelize(str) {
+                    return str.replace(/(?:^\w|[A-Z]|\b\w)/g, function (letter, index) {
+                        return index == 0 ? letter.toLowerCase() : letter.toUpperCase();
+                    }).replace(/\s+/g, '');
+                }
+
+                return camelize(projectName);
+            },
+
+            _formChanged: function () {
+                this.$.submit.disabled = !this.$.form.validate();
+            }
         });
     </script>
 </dom-module>
