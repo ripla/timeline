@@ -1,8 +1,10 @@
 <link rel="import" href="bower_components/polymer/polymer.html">
 <link rel="import" href="bower_components/iron-form/iron-form.html">
+
 <link rel="import" href="bower_components/paper-button/paper-button.html">
 <link rel="import" href="bower_components/paper-input/paper-input.html">
 <link rel="import" href="bower_components/paper-input/paper-textarea.html">
+<link rel="import" href="bower_components/paper-toolbar/paper-toolbar.html">
 
 <link href="bower_components/vaadin-date-picker/vaadin-date-picker.html"
       rel="import">
@@ -43,17 +45,24 @@
 
         #formcontainer {
             display: flex;
+            flex-direction: column;
             width: 100%;
-            justify-content: center;
+            align-items: center;
         }
 
-        form#form {
+        #form {
             width: 50%;
+            display: none;
         }
 
-        #form #buttons {
+        #buttons {
             display: flex;
             justify-content: flex-end;
+        }
+
+        #formHeader {
+            display: none;
+            width: 50%;
         }
     </style>
     <template>
@@ -111,7 +120,13 @@
         </paper-button>
 
         <div id="formcontainer">
-            <form is="iron-form" id="form" style="display: none"
+            <div id="formHeader">
+                <paper-toolbar>
+                    <span class="title"></span>
+                </paper-toolbar>
+            </div>
+            <form is="iron-form"
+                  id="form"
                   on-change="_formChanged">
 
                 <input name="id" type="hidden">
@@ -131,7 +146,8 @@
                 <vaadin-date-picker name="noteDate"
                                     id="formNoteDate"
                                     label="Note date"
-                                    required>
+                                    required
+                                    i18n="[[timelinei18n]]">
                 </vaadin-date-picker>
 
                 <div id="buttons">
@@ -162,7 +178,26 @@
                  * to an array of note objects. Those note objects
                  * have note and a date fields.
                  */
-                backendData: Object
+                backendData: Object,
+
+                timelinei18n: {
+                    type: Object,
+                    value: function () {
+                        return {
+                            monthNames: [
+                                'January', 'February', 'March', 'April', 'May',
+                                'June', 'July', 'August', 'September', 'October', 'November', 'December'
+                            ],
+                            weekdaysShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+                            firstDayOfWeek: 1,
+                            today: 'today',
+                            cancel: 'cancel',
+                            formatDate: function (d) {
+                                return d.getDate() + '.' + (d.getMonth() + 1) + '.' + d.getFullYear();
+                            }
+                        };
+                    }
+                }
             },
 
             /**
@@ -197,15 +232,13 @@
                     }
 
                     this.$.form.reset();
-                    this.$.add.style.display = "";
-                    this.$.form.style.display = "none";
+                    this._hideForm();
                 }
             },
 
             _cancelForm: function () {
                 this.$.form.reset();
-                this.$.add.style.display = "";
-                this.$.form.style.display = "none";
+                this._hideForm();
             },
 
             /**
@@ -372,17 +405,31 @@
             },
 
             _addNote: function () {
-                this.$.add.style.display = "none";
-                this.$.form.style.display = "";
+                this._showForm();
+                this.$.submit.disabled = true;
+                this.$.formHeader.querySelector('.title').textContent = 'Add note';
             },
 
             _editNote: function (id, projectName, noteDate, noteText) {
-                this.$.add.style.display = "none";
-                this.$.form.style.display = "";
+                this._showForm();
                 this.$.form.id.value = id;
                 this.$.formNoteProject.value = projectName;
                 this.$.formNoteDate.value = noteDate.toString("yyyy-MM-dd");
                 this.$.formNoteContent.value = noteText;
+                this.$.submit.disabled = false;
+                this.$.formHeader.querySelector('.title').textContent = 'Edit note';
+            },
+
+            _showForm: function () {
+                this.$.add.style.display = "none";
+                this.$.form.style.display = "initial";
+                this.$.formHeader.style.display = "initial";
+            },
+
+            _hideForm: function () {
+                this.$.add.style.display = "initial";
+                this.$.form.style.display = "none";
+                this.$.formHeader.style.display = "none";
             },
 
             _pointClicked: function (event) {
