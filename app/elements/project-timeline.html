@@ -29,26 +29,32 @@
             color: white;
         }
 
-        #formcontainer {
-            display: flex;
-            flex-direction: column;
+        #formContainer {
             width: 100%;
-            align-items: center;
+            display: none;
+            justify-content: center;
         }
 
-        #form {
+        #formContainer > #form {
             width: 50%;
-            display: none;
+            display: flex;
+            flex-flow: column nowrap;
+            justify-content: space-between;
+        }
+
+        #form > paper-checkbox {
+            padding-top: 1.5em;
+            align-self: flex-end;
         }
 
         #buttons {
             display: flex;
             justify-content: flex-end;
+            padding-top: 1.5em;
         }
 
         #formHeader {
             display: none;
-            width: 50%;
         }
     </style>
     <template>
@@ -105,15 +111,11 @@
             Add note
         </paper-button>
 
-        <div id="formcontainer">
-            <div id="formHeader">
-                <paper-toolbar>
+        <div id="formContainer">
+            <form is="iron-form" id="form">
+                <paper-toolbar id="formHeader">
                     <span class="title"></span>
                 </paper-toolbar>
-            </div>
-            <form is="iron-form"
-                  id="form"
-                  on-change="_formChanged">
 
                 <input name="id" type="hidden">
 
@@ -136,13 +138,18 @@
                                     i18n="[[timelinei18n]]">
                 </vaadin-date-picker>
 
+                <paper-checkbox name="addAnother"
+                                id="formAddAnother"
+                                checked="{{addAnotherNote}}">
+                    Add another note?
+                </paper-checkbox>
+
                 <div id="buttons">
                     <paper-button on-click="_cancelForm"
                                   class="cancel">
                         Cancel
                     </paper-button>
                     <paper-button raised
-                                  disabled
                                   on-click="_submitForm"
                                   id="submit">
                         <iron-icon icon="vaadin-icons:check"></iron-icon>
@@ -183,7 +190,9 @@
                             }
                         };
                     }
-                }
+                },
+
+                addAnotherNote: Boolean
             },
 
             /**
@@ -195,6 +204,21 @@
                 '_backendDataChanged(backendData.*)'
             ],
 
+            listeners: {
+
+            },
+
+            /**
+             * Workaround iron-form incorrectly resetting things
+             **/
+            _resetForm: function () {
+                this.$.formNoteProject.value = "";
+                this.$.formNoteContent.value = "";
+                this.$.formNoteDate.value = "";
+                this.$.formAddAnother.checked = false;
+                this.$.form.id.value = "";
+            },
+
             /**
              * Submit the add note form to the backend.
              */
@@ -203,27 +227,25 @@
                     var formData = this.$.form.serialize();
 
                     if (!formData.id || "" == formData.id) {
-
-                        //TODO debug, remove
-                        console.log("Adding: " + JSON.stringify(formData));
-
                         this.$.backend.addNote(formData.project, formData.note, Date.parse(formData.noteDate).getTime());
 
                     } else {
-                        //TODO debug, remove
-                        console.log("Modifying: " + JSON.stringify(formData));
-
                         this.$.backend.updateNote(formData.id, formData.project, formData.note, Date.parse(formData.noteDate).getTime());
-
                     }
 
-                    this.$.form.reset();
-                    this._hideForm();
+                    this._resetForm();
+
+                    if ("on" == formData.addAnother) {
+                        this.$.formNoteProject.focus();
+                        this.addAnotherNote = true;
+                    } else {
+                        this._hideForm();
+                    }
                 }
             },
 
             _cancelForm: function () {
-                this.$.form.reset();
+                this._resetForm();
                 this._hideForm();
             },
 
@@ -273,7 +295,12 @@
                 var newNavigatorSeriesDataElement = this._createDataElement(navigatorSeries);
 
                 var chartElement = Polymer.dom(this.$.timelineChart);
+
+                /*var navigatorXaxisElement = chartElement.querySelector('navigator x-axis');
+                 navigatorXaxisElement.setAttribute("min", navigatorSeries[0][0]);*/
+
                 var navigatorSeriesElement = chartElement.querySelector('navigator series');
+
                 var existingNavigatorSeriesDataElement = chartElement.querySelector('navigator series data');
 
                 if (existingNavigatorSeriesDataElement) {
@@ -392,7 +419,6 @@
 
             _addNote: function () {
                 this._showForm();
-                this.$.submit.disabled = true;
                 this.$.formHeader.querySelector('.title').textContent = 'Add note';
             },
 
@@ -402,19 +428,22 @@
                 this.$.formNoteProject.value = projectName;
                 this.$.formNoteDate.value = noteDate.toString("yyyy-MM-dd");
                 this.$.formNoteContent.value = noteText;
-                this.$.submit.disabled = false;
                 this.$.formHeader.querySelector('.title').textContent = 'Edit note';
+                this.$.formAddAnother.style.display = 'none';
+                this.addAnotherNote = false;
             },
 
             _showForm: function () {
                 this.$.add.style.display = "none";
-                this.$.form.style.display = "initial";
+                this.$.formContainer.style.display = "flex";
                 this.$.formHeader.style.display = "initial";
+                this.$.formAddAnother.style.display = 'initial';
+
             },
 
             _hideForm: function () {
                 this.$.add.style.display = "initial";
-                this.$.form.style.display = "none";
+                this.$.formContainer.style.display = "none";
                 this.$.formHeader.style.display = "none";
             },
 
@@ -433,11 +462,8 @@
                 }
 
                 return camelize(projectName);
-            },
-
-            _formChanged: function () {
-                this.$.submit.disabled = !this.$.form.validate();
             }
+
         });
     </script>
 </dom-module>
