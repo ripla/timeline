@@ -1,6 +1,6 @@
-<link rel="import" href="../bower_components/polymer/polymer.html">
+<link rel="import" href="../../bower_components/polymer/polymer.html">
 
-<script type="text/javascript" src="../scripts/date-fi-FI.js"></script>
+<script type="text/javascript" src="../../scripts/date-fi-FI.js"></script>
 
 <!-- An element that provides data on notes related to projects.
      The data contains a list of project names. Each project name is linked
@@ -23,13 +23,20 @@
                 data: {
                     type: Object,
                     notify: true
-
+                },
+                allNotes: {
+                    type: Array,
+                    notify: true
                 }
             },
 
             listeners: {
                 'iron-localstorage-load-empty': '_initializeData'
             },
+
+            observers: [
+                '_updateAllNotesArray(data.*)'
+            ],
 
             /**
              * Add a new note. Data is synchronized automatically and listeners
@@ -68,26 +75,6 @@
                 return this.data;
             },
 
-            /**
-             * Retrieve all the notes in all the projects
-             *
-             * @returns {Array} all known note objects in one, sorted array
-             */
-            getAllNotes: function () {
-                var allNotes = [];
-                for (var project in this.data) {
-                    if (this.data.hasOwnProperty(project)) {
-                        for (var i = 0; i < this.data[project].length; i++) {
-                            allNotes.push(this.data[project][i]);
-                        }
-                    }
-                }
-
-                allNotes.sort(this._noteDateComparator);
-
-                return allNotes;
-            },
-
             updateNote: function (id, project, note, noteTime) {
                 var notes = this.data[project];
                 for (var i = 0; i < notes.length; i++) {
@@ -100,6 +87,27 @@
                         });
                     }
                 }
+            },
+
+            /**
+             * Retrieve all the notes in all the projects
+             *
+             * @returns {Array} all known note objects in one, sorted array
+             */
+            _updateAllNotesArray: function (event) {
+                var newNoteArray = [];
+                for (var project in this.data) {
+                    if (this.data.hasOwnProperty(project)) {
+                        for (var i = 0; i < this.data[project].length; i++) {
+
+                            newNoteArray.push(this.data[project][i]);
+                        }
+                    }
+                }
+
+                newNoteArray.sort(this._noteDateComparator);
+
+                this.allNotes = newNoteArray;
             },
 
             /**

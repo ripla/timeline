@@ -1,0 +1,216 @@
+<link rel="import" href="../../bower_components/polymer/polymer.html">
+
+<script type="text/javascript" src="../../scripts/date-fi-FI.js"></script>
+
+<dom-module id="note-form">
+    <style is="custom-style">
+
+        paper-button.cancel {
+            color: var(--paper-red-300);
+        }
+
+        paper-button#submit {
+            background-color: var(--paper-green-500);
+            color: white;
+        }
+
+        paper-button#submit {
+            background-color: var(--paper-green-500);
+            color: white;
+        }
+
+        paper-button#submit[disabled] {
+            background-color: var(--paper-grey-500);
+            color: white;
+        }
+
+        #formContainer {
+            width: 100%;
+            display: none;
+            justify-content: center;
+        }
+
+        #formContainer > #form {
+            width: 50%;
+            display: flex;
+            flex-flow: column nowrap;
+            justify-content: space-between;
+        }
+
+        #form > paper-checkbox {
+            padding-top: 1.5em;
+            align-self: flex-end;
+        }
+
+        #buttons {
+            display: flex;
+            justify-content: flex-end;
+            padding-top: 1.5em;
+        }
+
+        #formHeader {
+            display: none;
+        }
+    </style>
+    <template>
+        <div id="formContainer">
+            <form is="iron-form" id="form">
+                <paper-toolbar id="formHeader">
+                    <span class="title">[[title]]</span>
+                </paper-toolbar>
+
+                <input name="id" type="hidden" value="[[id]]">
+
+                <paper-input name="project"
+                             id="formNoteProject"
+                             label="Project name"
+                             required
+                             value="{{project}}">
+                </paper-input>
+
+                <paper-textarea name="note"
+                                id="formNoteContent"
+                                label="Note"
+                                required
+                                value="{{note}}">
+                </paper-textarea>
+
+                <vaadin-date-picker name="noteDate"
+                                    id="formNoteDate"
+                                    label="Note date"
+                                    required
+                                    i18n="[[timelinei18n]]"
+                                    value="{{date}}">
+                </vaadin-date-picker>
+
+                <paper-checkbox name="addAnother"
+                                id="formAddAnother"
+                                checked="{{addAnotherNote}}">
+                    Add another note?
+                </paper-checkbox>
+
+                <div id="buttons">
+                    <paper-button on-click="_cancelForm"
+                                  class="cancel">
+                        Cancel
+                    </paper-button>
+                    <paper-button raised
+                                  on-click="_submitForm"
+                                  id="submit">
+                        <iron-icon icon="vaadin-icons:check"></iron-icon>
+                        Submit
+                    </paper-button>
+                </div>
+            </form>
+        </div>
+    </template>
+
+
+    <script>
+        Polymer({
+            is: 'note-form',
+
+            properties: {
+                timelinei18n: {
+                    type: Object,
+                    value: function () {
+                        return {
+                            monthNames: [
+                                'January', 'February', 'March', 'April', 'May',
+                                'June', 'July', 'August', 'September', 'October', 'November', 'December'
+                            ],
+                            weekdaysShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+                            firstDayOfWeek: 1,
+                            today: 'today',
+                            cancel: 'cancel',
+                            formatDate: function (d) {
+                                return d.getDate() + '.' + (d.getMonth() + 1) + '.' + d.getFullYear();
+                            }
+                        };
+                    }
+                },
+
+                addAnotherNote: Boolean,
+                project: String,
+                note: String,
+                date: String,
+                title: String,
+                id: String
+            },
+
+            observers: [
+
+            ],
+
+            listeners: {
+
+            },
+
+            addNote: function () {
+                this._showForm();
+                this.title = 'Add note';
+            },
+
+            editNote: function (id, projectName, noteDate, noteText) {
+                this._showForm();
+                this.id = id;
+                this.project = projectName;
+                this.date = noteDate.toString("yyyy-MM-dd");
+                this.note = noteText;
+                this.title = 'Edit note';
+                this.$.formAddAnother.style.display = 'none';
+                this.addAnotherNote = false;
+            },
+
+            /**
+             * Workaround iron-form incorrectly resetting things
+             **/
+            _resetForm: function () {
+                this.project = "";
+                this.note = "";
+                this.date = "";
+                this.addAnotherNote = false;
+                this.id = "";
+            },
+
+            /**
+             * Submit the add note form to the backend.
+             */
+            _submitForm: function () {
+                if (this.$.form.validate()) {
+                    var formData = this.$.form.serialize();
+
+                    this.fire('note-form-submit', formData);
+
+                    this._resetForm();
+
+                    if ("on" == formData.addAnother) {
+                        this.$.formNoteProject.focus();
+                        this.addAnotherNote = true;
+                    } else {
+                        this._hideForm();
+                    }
+                }
+            },
+
+            _cancelForm: function () {
+                this._resetForm();
+                this._hideForm();
+
+                this.fire('note-form-cancel');
+            },
+
+            _showForm: function () {
+                this.$.formContainer.style.display = "flex";
+                this.$.formHeader.style.display = "initial";
+                this.$.formAddAnother.style.display = 'initial';
+
+            },
+
+            _hideForm: function () {
+                this.$.formContainer.style.display = "none";
+                this.$.formHeader.style.display = "none";
+            }
+        });
+    </script>
+</dom-module>

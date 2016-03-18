@@ -1,14 +1,27 @@
 <!doctype html>
 <html lang="en">
-<head>
-    <meta charset="utf-8">
-    <script src="bower_components/webcomponentsjs/webcomponents-lite.js"></script>
+    <head>
+        <meta charset="utf-8">
+        <script src="bower_components/webcomponentsjs/webcomponents-lite.js"></script>
 
-    <link href="elements/elements.html" rel="import">
-</head>
-<body>
+        <link href="elements/elements.html" rel="import">
+    </head>
 
-<project-timeline></project-timeline>
+    <body unresolved>
+        <template is="dom-bind" id="app">
+            <backend-service data="{{backendData}}" all-notes="{{allBackendNotes}}"></backend-service>
 
-</body>
+            <project-timeline data="[[backendData]]" all-notes="[[allBackendNotes]]"></project-timeline>
+
+            <paper-button raised
+                          id="add">
+                <iron-icon icon="vaadin-icons:plus"></iron-icon>
+                Add note
+            </paper-button>
+
+            <note-form></note-form>
+        </template>
+
+        <script src="scripts/app.js"></script>
+    </body>
 </html>

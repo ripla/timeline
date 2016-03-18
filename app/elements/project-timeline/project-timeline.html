@@ -1,65 +1,9 @@
-<link rel="import" href="../bower_components/polymer/polymer.html">
+<link rel="import" href="../../bower_components/polymer/polymer.html">
 
-<script type="text/javascript" src="../scripts/date-fi-FI.js"></script>
+<script type="text/javascript" src="../../scripts/date-fi-FI.js"></script>
 
 <dom-module id="project-timeline">
-    <style is="custom-style">
-
-        paper-button#add {
-            background-color: var(--paper-blue-500);
-            color: white;
-        }
-
-        paper-button.cancel {
-            color: var(--paper-red-300);
-        }
-
-        paper-button#submit {
-            background-color: var(--paper-green-500);
-            color: white;
-        }
-
-        paper-button#submit {
-            background-color: var(--paper-green-500);
-            color: white;
-        }
-
-        paper-button#submit[disabled] {
-            background-color: var(--paper-grey-500);
-            color: white;
-        }
-
-        #formContainer {
-            width: 100%;
-            display: none;
-            justify-content: center;
-        }
-
-        #formContainer > #form {
-            width: 50%;
-            display: flex;
-            flex-flow: column nowrap;
-            justify-content: space-between;
-        }
-
-        #form > paper-checkbox {
-            padding-top: 1.5em;
-            align-self: flex-end;
-        }
-
-        #buttons {
-            display: flex;
-            justify-content: flex-end;
-            padding-top: 1.5em;
-        }
-
-        #formHeader {
-            display: none;
-        }
-    </style>
     <template>
-        <backend-service id="backend" data="{{backendData}}"></backend-service>
-
         <vaadin-column-chart timeline id="timelineChart"
                              on-point-click="_pointClicked">
             <chart animation="true"></chart>
@@ -103,61 +47,6 @@
             <exporting enabled="false"></exporting>
 
         </vaadin-column-chart>
-
-        <paper-button raised
-                      on-click="_addNote"
-                      id="add">
-            <iron-icon icon="vaadin-icons:plus"></iron-icon>
-            Add note
-        </paper-button>
-
-        <div id="formContainer">
-            <form is="iron-form" id="form">
-                <paper-toolbar id="formHeader">
-                    <span class="title"></span>
-                </paper-toolbar>
-
-                <input name="id" type="hidden">
-
-                <paper-input name="project"
-                             id="formNoteProject"
-                             label="Project name"
-                             required>
-                </paper-input>
-
-                <paper-textarea name="note"
-                                id="formNoteContent"
-                                label="Note"
-                                required>
-                </paper-textarea>
-
-                <vaadin-date-picker name="noteDate"
-                                    id="formNoteDate"
-                                    label="Note date"
-                                    required
-                                    i18n="[[timelinei18n]]">
-                </vaadin-date-picker>
-
-                <paper-checkbox name="addAnother"
-                                id="formAddAnother"
-                                checked="{{addAnotherNote}}">
-                    Add another note?
-                </paper-checkbox>
-
-                <div id="buttons">
-                    <paper-button on-click="_cancelForm"
-                                  class="cancel">
-                        Cancel
-                    </paper-button>
-                    <paper-button raised
-                                  on-click="_submitForm"
-                                  id="submit">
-                        <iron-icon icon="vaadin-icons:check"></iron-icon>
-                        Submit
-                    </paper-button>
-                </div>
-            </form>
-        </div>
     </template>
 
 
@@ -171,7 +60,9 @@
                  * to an array of note objects. Those note objects
                  * have note and a date fields.
                  */
-                backendData: Object,
+                data: Object,
+
+                allNotes: String,
 
                 timelinei18n: {
                     type: Object,
@@ -190,9 +81,7 @@
                             }
                         };
                     }
-                },
-
-                addAnotherNote: Boolean
+                }
             },
 
             /**
@@ -201,52 +90,12 @@
              * Hence we need to monitor the whole object.
              */
             observers: [
-                '_backendDataChanged(backendData.*)'
+                '_backendDataChanged(data.*)',
+                '_updateNavigatorSeries(allNotes)'
             ],
 
             listeners: {
 
-            },
-
-            /**
-             * Workaround iron-form incorrectly resetting things
-             **/
-            _resetForm: function () {
-                this.$.formNoteProject.value = "";
-                this.$.formNoteContent.value = "";
-                this.$.formNoteDate.value = "";
-                this.$.formAddAnother.checked = false;
-                this.$.form.id.value = "";
-            },
-
-            /**
-             * Submit the add note form to the backend.
-             */
-            _submitForm: function () {
-                if (this.$.form.validate()) {
-                    var formData = this.$.form.serialize();
-
-                    if (!formData.id || "" == formData.id) {
-                        this.$.backend.addNote(formData.project, formData.note, Date.parse(formData.noteDate).getTime());
-
-                    } else {
-                        this.$.backend.updateNote(formData.id, formData.project, formData.note, Date.parse(formData.noteDate).getTime());
-                    }
-
-                    this._resetForm();
-
-                    if ("on" == formData.addAnother) {
-                        this.$.formNoteProject.focus();
-                        this.addAnotherNote = true;
-                    } else {
-                        this._hideForm();
-                    }
-                }
-            },
-
-            _cancelForm: function () {
-                this._resetForm();
-                this._hideForm();
             },
 
             /**
@@ -284,8 +133,9 @@
              *
              * @private
              */
-            _updateNavigatorSeries: function () {
-                var allNotes = this.$.backend.getAllNotes();
+            _updateNavigatorSeries: function (event) {
+                var allNotes = event;
+                var chart = this.$.timelineChart;
 
                 var navigatorSeries = [];
                 for (var i = 0; i < allNotes.length; i++) {
@@ -296,9 +146,6 @@
 
                 var chartElement = Polymer.dom(this.$.timelineChart);
 
-                /*var navigatorXaxisElement = chartElement.querySelector('navigator x-axis');
-                 navigatorXaxisElement.setAttribute("min", navigatorSeries[0][0]);*/
-
                 var navigatorSeriesElement = chartElement.querySelector('navigator series');
 
                 var existingNavigatorSeriesDataElement = chartElement.querySelector('navigator series data');
@@ -308,6 +155,10 @@
                 }
 
                 navigatorSeriesElement.appendChild(newNavigatorSeriesDataElement);
+
+                if (chart.isInitialized()) {
+                    chart.reloadConfiguration();
+                }
             },
 
             /**
@@ -319,17 +170,17 @@
              * @private
              */
             _backendDataChanged: function (valueChangeEvent) {
-                var allIsNewRegexp = /^backendData$/;
-                var newProjectRegexp = /^backendData\.((\w|\s)*)$/;
-                var newNoteRegexp = /^backendData\.(.*)\.splices$/;
-                var noteUpdateRegexp = /^backendData\.(.*)\.#(\d*)$/;
+                var allIsNewRegexp = /^data$/;
+                var newProjectRegexp = /^data\.((\w|\s)*)$/;
+                var newNoteRegexp = /^data\.(.*)\.splices$/;
+                var noteUpdateRegexp = /^data\.(.*)\.#(\d*)$/;
 
                 var chart = this.$.timelineChart;
 
                 if (allIsNewRegexp.test(valueChangeEvent.path)) {
                     //everything changed, aka first load
 
-                    var backendNotes = this.$.backend.getProjectNotes();
+                    var backendNotes = valueChangeEvent.base;
 
                     var allDataSeries = Polymer.dom(chart).querySelectorAll('data-series');
 
@@ -387,8 +238,6 @@
                     Polymer.dom(dataSeriesElement).appendChild(newDataElement);
                 }
 
-                this._updateNavigatorSeries();
-
                 if (chart.isInitialized()) {
                     chart.reloadConfiguration();
                 }
@@ -417,41 +266,13 @@
                 return newArray;
             },
 
-            _addNote: function () {
-                this._showForm();
-                this.$.formHeader.querySelector('.title').textContent = 'Add note';
-            },
-
-            _editNote: function (id, projectName, noteDate, noteText) {
-                this._showForm();
-                this.$.form.id.value = id;
-                this.$.formNoteProject.value = projectName;
-                this.$.formNoteDate.value = noteDate.toString("yyyy-MM-dd");
-                this.$.formNoteContent.value = noteText;
-                this.$.formHeader.querySelector('.title').textContent = 'Edit note';
-                this.$.formAddAnother.style.display = 'none';
-                this.addAnotherNote = false;
-            },
-
-            _showForm: function () {
-                this.$.add.style.display = "none";
-                this.$.formContainer.style.display = "flex";
-                this.$.formHeader.style.display = "initial";
-                this.$.formAddAnother.style.display = 'initial';
-
-            },
-
-            _hideForm: function () {
-                this.$.add.style.display = "initial";
-                this.$.formContainer.style.display = "none";
-                this.$.formHeader.style.display = "none";
-            },
-
             _pointClicked: function (event) {
-                console.log("Click!");
-                console.log(event);
-
-                this._editNote(event.detail.point.noteId, event.detail.point.series.name, new Date(event.detail.point.x), event.detail.point.name);
+                this.fire('project-timeline-point-click',{
+                    id: event.detail.point.noteId,
+                    project: event.detail.point.series.name,
+                    date: new Date(event.detail.point.x),
+                    note: event.detail.point.name
+                });
             },
 
             _getProjectNameAsId: function (projectName) {
