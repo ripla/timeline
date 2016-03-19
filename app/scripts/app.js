@@ -24,7 +24,7 @@
         form.addEventListener('note-form-submit', function (event) {
             var formData = event.detail;
             if (!formData.id || "" == formData.id) {
-                backend.addNote(formData.project, formData.note, Date.parse(formData.noteDate).getTime());
+                backend.addNote(formData.project, formData.note, Date.parseExact(formData.noteDate, 'yyyy-MM-dd').getTime());
 
             } else {
                 backend.updateNote(formData.id, formData.project, formData.note, Date.parse(formData.noteDate).getTime());

@@ -40,7 +40,8 @@
 
             <navigator>
                 <series line-width="0"
-                        type="line">
+                        type="line"
+                        id="navigator">
                 </series>
             </navigator>
 
@@ -55,14 +56,9 @@
             is: 'project-timeline',
 
             properties: {
-                /**
-                 * Object with project names as keys
-                 * to an array of note objects. Those note objects
-                 * have note and a date fields.
-                 */
-                data: Object,
+                projects: Array,
 
-                allNotes: String,
+                notes: Array,
 
                 timelinei18n: {
                     type: Object,
@@ -90,12 +86,223 @@
              * Hence we need to monitor the whole object.
              */
             observers: [
-                '_backendDataChanged(data.*)',
-                '_updateNavigatorSeries(allNotes)'
+                '_notesChanged(notes.*)',
+                '_projectsChanged(projects.*)'
             ],
 
-            listeners: {
+            listeners: {},
 
+            ready: function () {
+                if (!this._isChartLoaded) {
+                    this.$.timelineChart.showLoading();
+                }
+            },
+
+
+            /**
+             * Called when backend data changes. Figures out what exactly
+             * changed and updates the chart accordingly.
+             *
+             * @param event event from Polymer signaling that
+             *        something in the backend notes changed
+             * @private
+             */
+            _notesChanged: function (event) {
+                console.log("Notes changed: " + event);
+
+                if (!event.base || event.base.length == 0) {
+                    return;
+                }
+
+                if (!this._isChartLoaded()) {
+                    // chart not rendered, create elements
+                    var notes = event.base;
+                    this._createChartDataElements(notes);
+
+                } else if ("notes" === event.path) {
+                    this._addNotesToChart(event.base);
+
+                } else if (event.value.indexSplices.length > 1) {
+                    var newNotes = [];
+                    for (var i = 0; i < event.value.indexSplices.length; i++) {
+                        var newNoteIndex = event.value.indexSplices[i].index;
+                        var newNote = event.value.indexSplices[i].object[newNoteIndex];
+                        newNotes.push(newNote);
+                    }
+
+                    this._addNotesToChart(newNotes);
+
+                } else if (event.value.indexSplices.length == 1) {
+                    var newNoteIndex = event.value.indexSplices[0].index;
+                    var newNote = event.value.indexSplices[0].object[newNoteIndex];
+                    this._addNoteToChart(newNote, true);
+                }
+
+                this._updateNavigatorSeries(event);
+
+                this.$.timelineChart.chart.hideLoading();
+            },
+
+            _projectsChanged: function (event) {
+                console.log("Projects changed: " + event);
+            },
+
+            /**
+             * Update the series for the navigator below the chart. This series
+             * is special, since it must contain all the dates from all the
+             * projects, so that it can show the correct date range.
+             *
+             * @private
+             */
+            _updateNavigatorSeries: function (event) {
+                if (!this._isChartLoaded()) {
+                    // chart not rendered, create elements
+                    var notes = event.base;
+
+                    var navigatorSeries = [];
+                    for (var i = 0; i < notes.length; i++) {
+                        navigatorSeries.push([notes[i].date, 0]);
+                    }
+
+                    var newNavigatorSeriesDataElement = this._createDataElement(navigatorSeries);
+
+                    var chartElement = Polymer.dom(this.$.timelineChart);
+
+                    var navigatorSeriesElement = chartElement.querySelector('navigator series');
+
+                    var existingNavigatorSeriesDataElement = chartElement.querySelector('navigator series data');
+
+                    if (existingNavigatorSeriesDataElement) {
+                        navigatorSeriesElement.removeChild(existingNavigatorSeriesDataElement);
+                    }
+
+                    navigatorSeriesElement.appendChild(newNavigatorSeriesDataElement);
+
+                } else if (event.path === "notes") {
+                    var navigatorNotes = event.base.slice();
+                    for(var i = 0; i < navigatorNotes; i++) {
+                        navigatorNotes[i].project.name = "navigator";
+                    }
+
+                    this._addNotesToChart(navigatorNotes);
+
+                } else if (event.value.indexSplices.length > 1) {
+                    var newNotes = [];
+                    for (var i = 0; i < event.value.indexSplices.length; i++) {
+                        var newNoteIndex = event.value.indexSplices[i].index;
+                        var newNote = event.value.indexSplices[i].object[newNoteIndex];
+                        newNote.project.name = "navigator";
+                        newNotes.push(newNote);
+                    }
+                    this._addNotesToChart(newNotes);
+
+                } else if (event.value.indexSplices.length == 1) {
+                    var newNoteIndex = event.value.indexSplices[0].index;
+                    var newNote = event.value.indexSplices[0].object[newNoteIndex];
+                    newNote.name = "navigator";
+                    this._addNoteToChart(newNote, true);
+                }
+            },
+
+            _isChartLoaded: function () {
+                return this.$.timelineChart.isInitialized();
+            },
+
+            _addNotesToChart: function (notes) {
+                for (var i = 0; i < notes.length; i++) {
+                    this._addNoteToChart(notes[i], false);
+                }
+
+                this.$.timelineChart.chart.redraw();
+            },
+
+            _addNoteToChart: function (newNote, redraw) {
+                var chart = this.$.timelineChart.chart;
+
+                var projectName = newNote.project.name;
+                var projectNameAsId = this._getProjectNameAsId(projectName);
+                var noteSeries = chart.get(projectNameAsId);
+
+                if (noteSeries == null) {
+                    noteSeries = chart.addSeries({
+                        name: projectName,
+                        id: projectNameAsId
+                    }, redraw);
+                }
+
+                noteSeries.addPoint({
+                    x: newNote.date,
+                    name: newNote.note,
+                    y: Math.random() + 1,
+                    noteId: newNote.noteId
+                }, redraw);
+            },
+
+            _createChartDataElements: function (notes) {
+                var chart = this.$.timelineChart;
+
+                var projectsAndNotes = {};
+                for (var i = 0; i < notes.length; i++) {
+                    var note = notes[i];
+                    if (!projectsAndNotes[note.project.name]) {
+                        projectsAndNotes[note.project.name] = [];
+                    }
+
+                    projectsAndNotes[note.project.name].push(notes[i]);
+                }
+
+                for (var project in projectsAndNotes) {
+                    if (projectsAndNotes.hasOwnProperty(project)) {
+                        var mappedData = this._mapBackendProjectData(projectsAndNotes[project]);
+
+                        var dsElement = this._createDataSeriesElement(project);
+                        var dataElement = this._createDataElement(mappedData);
+                        Polymer.dom(chart).appendChild(dsElement);
+                        Polymer.dom(dsElement).appendChild(dataElement);
+                    }
+                }
+            },
+
+            /**
+             * Map backend data format into something our chart expects.
+             * The note date is the x value.
+             *
+             * @param backendProjectArray array of backend notes
+             * @returns {Array} array of chart point objects
+             * @private
+             */
+            _mapBackendProjectData: function (backendProjectArray) {
+                var newArray = [];
+                for (var i = 0; i < backendProjectArray.length; i++) {
+                    var backendDataItem = backendProjectArray[i];
+                    newArray.push({
+                        x: backendDataItem.date,
+                        name: backendDataItem.note,
+                        y: Math.random() + 1,
+                        noteId: backendDataItem.noteId
+                    });
+                }
+
+                return newArray;
+            },
+
+            _pointClicked: function (event) {
+                this.fire('project-timeline-point-click', {
+                    id: event.detail.point.noteId,
+                    project: event.detail.point.series.name,
+                    date: new Date(event.detail.point.x),
+                    note: event.detail.point.name
+                });
+            },
+
+            _getProjectNameAsId: function (projectName) {
+                function camelize(str) {
+                    return str.replace(/(?:^\w|[A-Z]|\b\w)/g, function (letter, index) {
+                        return index == 0 ? letter.toLowerCase() : letter.toUpperCase();
+                    }).replace(/\s+/g, '');
+                }
+
+                return camelize(projectName);
             },
 
             /**
@@ -124,167 +331,7 @@
                 var jsonArray = JSON.stringify(contentsArray);
                 dataElement.textContent = jsonArray.substring(1, jsonArray.length - 1);
                 return dataElement;
-            },
-
-            /**
-             * Update the series for the navigator below the chart. This series
-             * is special, since it must contain all the dates from all the
-             * projects, so that it can show the correct date range.
-             *
-             * @private
-             */
-            _updateNavigatorSeries: function (event) {
-                var allNotes = event;
-                var chart = this.$.timelineChart;
-
-                var navigatorSeries = [];
-                for (var i = 0; i < allNotes.length; i++) {
-                    navigatorSeries.push([allNotes[i].date, 0]);
-                }
-
-                var newNavigatorSeriesDataElement = this._createDataElement(navigatorSeries);
-
-                var chartElement = Polymer.dom(this.$.timelineChart);
-
-                var navigatorSeriesElement = chartElement.querySelector('navigator series');
-
-                var existingNavigatorSeriesDataElement = chartElement.querySelector('navigator series data');
-
-                if (existingNavigatorSeriesDataElement) {
-                    navigatorSeriesElement.removeChild(existingNavigatorSeriesDataElement);
-                }
-
-                navigatorSeriesElement.appendChild(newNavigatorSeriesDataElement);
-
-                if (chart.isInitialized()) {
-                    chart.reloadConfiguration();
-                }
-            },
-
-            /**
-             * Called when backend data changes. Figures out what exactly
-             * changed and updates the chart DOM accordingly.
-             *
-             * @param valueChangeEvent event from Polymer signaling that
-             *        something in the backend data changed
-             * @private
-             */
-            _backendDataChanged: function (valueChangeEvent) {
-                var allIsNewRegexp = /^data$/;
-                var newProjectRegexp = /^data\.((\w|\s)*)$/;
-                var newNoteRegexp = /^data\.(.*)\.splices$/;
-                var noteUpdateRegexp = /^data\.(.*)\.#(\d*)$/;
-
-                var chart = this.$.timelineChart;
-
-                if (allIsNewRegexp.test(valueChangeEvent.path)) {
-                    //everything changed, aka first load
-
-                    var backendNotes = valueChangeEvent.base;
-
-                    var allDataSeries = Polymer.dom(chart).querySelectorAll('data-series');
-
-                    for (var i = 0; i < allDataSeries.length; i++) {
-                        var dataSeries = allDataSeries[i];
-                        Polymer.dom(chart).removeChild(dataSeries);
-                    }
-
-                    for (var project in backendNotes) {
-                        if (backendNotes.hasOwnProperty(project)) {
-                            var mappedData = this._mapBackendProjectData(backendNotes[project]);
-
-                            var dsElement = this._createDataSeriesElement(project);
-                            var dataElement = this._createDataElement(mappedData);
-                            Polymer.dom(chart).appendChild(dsElement);
-                            Polymer.dom(dsElement).appendChild(dataElement);
-                        }
-                    }
-
-                } else if (newProjectRegexp.test(valueChangeEvent.path)) {
-                    //new project added
-                    var newProjectName = newProjectRegexp.exec(valueChangeEvent.path)[1];
-                    var dsElement = this._createDataSeriesElement(newProjectName);
-                    Polymer.dom(chart).appendChild(dsElement);
-
-                } else if (newNoteRegexp.test(valueChangeEvent.path)) {
-                    //new note added, update whole series
-                    var existingProjectName = newNoteRegexp.exec(valueChangeEvent.path)[1];
-                    var projectNoteArray = valueChangeEvent.value.indexSplices[0].object;
-                    var mappedData = this._mapBackendProjectData(projectNoteArray);
-
-                    var dataSeriesElement = Polymer.dom(chart).querySelector('#' + this._getProjectNameAsId(existingProjectName));
-                    var existingSeriesDataElement = Polymer.dom(dataSeriesElement).querySelector('data');
-                    if (existingSeriesDataElement) {
-                        dataSeriesElement.removeChild(existingSeriesDataElement);
-                    }
-
-                    var newDataElement = this._createDataElement(mappedData);
-                    Polymer.dom(dataSeriesElement).appendChild(newDataElement);
-                } else if (noteUpdateRegexp.test(valueChangeEvent.path)) {
-                    //old note updated, update whole series
-                    var existingProjectName = noteUpdateRegexp.exec(valueChangeEvent.path)[1];
-                    // TODO update just one note instead of whole array?
-                    // var noteIndex = noteUpdateRegexp.exec(valueChangeEvent.path)[2];
-                    var projectNoteArray = valueChangeEvent.base[existingProjectName];
-                    var mappedData = this._mapBackendProjectData(projectNoteArray);
-
-                    var dataSeriesElement = Polymer.dom(chart).querySelector('#' + this._getProjectNameAsId(existingProjectName));
-                    var existingSeriesDataElement = Polymer.dom(dataSeriesElement).querySelector('data');
-                    if (existingSeriesDataElement) {
-                        dataSeriesElement.removeChild(existingSeriesDataElement);
-                    }
-
-                    var newDataElement = this._createDataElement(mappedData);
-                    Polymer.dom(dataSeriesElement).appendChild(newDataElement);
-                }
-
-                if (chart.isInitialized()) {
-                    chart.reloadConfiguration();
-                }
-            },
-
-            /**
-             * Map backend data format into something our chart expects.
-             * The note date is the x value.
-             *
-             * @param backendProjectArray array of backend notes
-             * @returns {Array} array of chart point objects
-             * @private
-             */
-            _mapBackendProjectData: function (backendProjectArray) {
-                var newArray = [];
-                for (var i = 0; i < backendProjectArray.length; i++) {
-                    var backendDataItem = backendProjectArray[i];
-                    newArray.push({
-                        x: backendDataItem.date,
-                        name: backendDataItem.note,
-                        y: Math.random() + 1,
-                        noteId: backendDataItem.noteId
-                    });
-                }
-
-                return newArray;
-            },
-
-            _pointClicked: function (event) {
-                this.fire('project-timeline-point-click',{
-                    id: event.detail.point.noteId,
-                    project: event.detail.point.series.name,
-                    date: new Date(event.detail.point.x),
-                    note: event.detail.point.name
-                });
-            },
-
-            _getProjectNameAsId: function (projectName) {
-                function camelize(str) {
-                    return str.replace(/(?:^\w|[A-Z]|\b\w)/g, function (letter, index) {
-                        return index == 0 ? letter.toLowerCase() : letter.toUpperCase();
-                    }).replace(/\s+/g, '');
-                }
-
-                return camelize(projectName);
             }
-
         });
     </script>
 </dom-module>

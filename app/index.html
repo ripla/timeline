@@ -9,9 +9,9 @@
 
     <body unresolved>
         <template is="dom-bind" id="app">
-            <backend-service data="{{backendData}}" all-notes="{{allBackendNotes}}"></backend-service>
+            <backend-service notes="{{notes}}" projects="{{projects}}"></backend-service>
 
-            <project-timeline data="[[backendData]]" all-notes="[[allBackendNotes]]"></project-timeline>
+            <project-timeline notes="[[notes]]" projects="[[projects]]"></project-timeline>
 
             <paper-button raised
                           id="add">

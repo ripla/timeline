@@ -11,76 +11,143 @@
 
     <template>
         <iron-localstorage
-                name="project-timeline-storage"
-                value="{{data}}"></iron-localstorage>
+                name="timeline-storage-projects"
+                value="{{projects}}">
+        </iron-localstorage>
+
+        <iron-localstorage
+                name="timeline-storage-notes"
+                value="{{notes}}"
+                on-iron-localstorage-load-empty="_initializeData">
+        </iron-localstorage>
     </template>
 
     <script>
         Polymer({
             is: "backend-service",
 
+            /**
+             * @typedef {Object} Project
+             * @property {String} name The name of the project
+             * @property {String} projectId the unique id of the project
+             */
+
+            /**
+             * @typedef {Object} Note
+             * @property {Project} project The project that this note belongs to
+             * @property {String} note the textual contents of this note
+             * @property {Number} date date in Unix time format (ms from Epoch)
+             * @property {String} noteId unique id for this note object
+             */
+
             properties: {
-                data: {
-                    type: Object,
-                    notify: true
-                },
-                allNotes: {
+                projects: {
                     type: Array,
-                    notify: true
+                    notify: true,
+                    value: function () {
+                        return [];
+                    }
+                },
+                notes: {
+                    type: Array,
+                    notify: true,
+                    value: function () {
+                        return [];
+                    }
                 }
             },
 
-            listeners: {
-                'iron-localstorage-load-empty': '_initializeData'
+            listeners: {},
+
+            observers: [],
+
+            /**
+             * Ensure that a project with the given name exists and create if
+             * it doesn't.
+             *
+             * @param projectName name of the project to add
+             * @return {Project} the created or existing project object
+             **/
+            addOrGetProject: function (projectName) {
+                if (!this.projectExists(projectName)) {
+                    var newProject = {
+                        name: projectName,
+                        projectId: this._guid() //not really random, for testing
+                    };
+                    this.push('projects', newProject);
+                    return newProject;
+                } else {
+                    return this.getProject(projectName);
+                }
             },
 
-            observers: [
-                '_updateAllNotesArray(data.*)'
-            ],
+            /**
+             * Retrieve a project by name. Use {@link #projectExists} to check
+             * before calling this.
+             *
+             * @param projectName name of the project to retrieve
+             * @return {Project} the created or existing project object or
+             *          undefined
+             **/
+            getProject: function (projectName) {
+                for (var i = 0; i < this.projects.length; i++) {
+                    if (this.projects[i].name == projectName) {
+                        return this.projects[i];
+                    }
+                }
+            },
 
             /**
              * Add a new note. Data is synchronized automatically and listeners
              * notified.
              *
-             * @param project non-empty name of the project
+             * @param projectName non-empty name of the project
              * @param note non-empty contents of the note
              * @param date note date in Unix time format (ms from Epoch)
+             * @return {Note} the created note
              */
-            addNote: function (project, note, date) {
-                if (!this.data[project]) {
-                    this.set('data.' + project, []);
-                }
+            addNote: function (projectName, note, date) {
+                //ensure new project exists
+                var project = this.addOrGetProject(projectName);
 
-                this.push('data.' + project, {
+                var newNote = {
+                    project: project,
                     note: note,
                     date: date,
                     noteId: this._guid() //not really random, for testing
-                });
+                };
+
+                this.push('notes', newNote);
+
+                return newNote;
             },
 
             /**
              *
-             * @returns {Object} Returns an object with project names as keys
-             *                   to an array of note objects. Those note objects
+             * @return {Note[]} Returns an array of note objects. Those note objects
              *                   have note and a date fields. The note arrays
              *                   are sorted by date.
              */
             getProjectNotes: function () {
-                for (var project in this.data) {
-                    if (this.data.hasOwnProperty(project)) {
-                        this.data[project].sort(this._noteDateComparator);
-                    }
-                }
-
-                return this.data;
+                return this.notes.sort(this._noteDateComparator).slice(0);
             },
 
-            updateNote: function (id, project, note, noteTime) {
-                var notes = this.data[project];
-                for (var i = 0; i < notes.length; i++) {
-                    if (notes[i].noteId == id) {
-                        var dataPath = 'data.' + project + '.' + i;
-                        this.set(dataPath, {
+            /**
+             * Update an existing note
+             *
+             * @param id {String} note id
+             * @param projectName {String} note project name
+             * @param note {String} note contents
+             * @param noteTime {Number} note date in Unix time format (ms from Epoch)
+             **/
+            updateNote: function (id, projectName, note, noteTime) {
+                for (var i = 0; i < this.notes.length; i++) {
+                    if (this.notes[i].noteId == id) {
+                        //ensure new project exists
+                        var project = this.addOrGetProject(projectName);
+
+                        this.set('notes.' + i, {
+                            project: project,
                             note: note,
                             date: noteTime,
                             noteId: id
@@ -90,24 +157,19 @@
             },
 
             /**
-             * Retrieve all the notes in all the projects
+             * Check if a project with the given name exists
              *
-             * @returns {Array} all known note objects in one, sorted array
-             */
-            _updateAllNotesArray: function (event) {
-                var newNoteArray = [];
-                for (var project in this.data) {
-                    if (this.data.hasOwnProperty(project)) {
-                        for (var i = 0; i < this.data[project].length; i++) {
-
-                            newNoteArray.push(this.data[project][i]);
-                        }
+             * @param projectName
+             * @return {Boolean}
+             **/
+            projectExists: function (projectName) {
+                for (var i = 0; i < this.projects.length; i++) {
+                    if (this.projects[i].name == projectName) {
+                        return true;
                     }
                 }
 
-                newNoteArray.sort(this._noteDateComparator);
-
-                this.allNotes = newNoteArray;
+                return false;
             },
 
             /**
@@ -115,7 +177,9 @@
              * @private
              */
             _initializeData: function () {
-                this.data = {};
+                //yes, this is needed
+                this.projects = [];
+                this.notes = [];
                 this.addNote("Test project 1", "We decided to start on doing XYZ", new Date().last().december().getTime());
                 this.addNote("Test project 1", "Continue working on XYZ. Decided to do ABC as well.", new Date().last().january().getTime());
                 this.addNote("Test project 1", "Work on XYZ stopped as ABC takes all our time.", new Date().last().february().getTime());
@@ -136,6 +200,12 @@
                 return 0;
             },
 
+            /**
+             * Generate a pseudorandom id
+             *
+             * @return {string}
+             * @private
+             */
             _guid: function () {
                 function s4() {
                     return Math.floor((1 + Math.random()) * 0x10000)
