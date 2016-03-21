@@ -1,6 +1,7 @@
 (function (document) {
     'use strict';
 
+    moment.locale('fi');
 
     app.addEventListener('dom-change', function () {
         console.log('dom-change');
@@ -24,10 +25,10 @@
         form.addEventListener('note-form-submit', function (event) {
             var formData = event.detail;
             if (!formData.id || "" == formData.id) {
-                backend.addNote(formData.project, formData.note, Date.parseExact(formData.noteDate, 'yyyy-MM-dd').getTime());
+                backend.addNote(formData.project, formData.note, moment(formData.noteDate).valueOf());
 
             } else {
-                backend.updateNote(formData.id, formData.project, formData.note, Date.parse(formData.noteDate).getTime());
+                backend.updateNote(formData.id, formData.project, formData.note, moment(formData.noteDate).valueOf());
             }
 
             if (!form.addAnotherNote) {

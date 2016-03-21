@@ -1,7 +1,5 @@
 <link rel="import" href="../../bower_components/polymer/polymer.html">
 
-<script type="text/javascript" src="../../scripts/date-fi-FI.js"></script>
-
 <dom-module id="project-timeline">
     <template>
         <vaadin-column-chart timeline id="timelineChart"
@@ -14,7 +12,7 @@
                      point-formatter="function() {
                                     return '<span style=\'color:' + this.color + '\'>&#x25CF </span>'
                                     + '<b>Project: </b>' + this.series.name + '<br/>'
-                                    + '<b> Note on ' + Highcharts.dateFormat('%d.%m.%Y', this.x) + ':</b><br/>'
+                                    + '<b> Note on ' + moment(this.x).format(moment.localeData().longDateFormat('L')) + ':</b><br/>'
                                     + '<span> ' + (this.name.length < 30 ? this.name : this.name.substring(0,30) + '...') + '</span>'
                                     + '<br/><br/>';}"
                      use-html="true"
@@ -60,23 +58,9 @@
 
                 notes: Array,
 
-                timelinei18n: {
-                    type: Object,
-                    value: function () {
-                        return {
-                            monthNames: [
-                                'January', 'February', 'March', 'April', 'May',
-                                'June', 'July', 'August', 'September', 'October', 'November', 'December'
-                            ],
-                            weekdaysShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
-                            firstDayOfWeek: 1,
-                            today: 'today',
-                            cancel: 'cancel',
-                            formatDate: function (d) {
-                                return d.getDate() + '.' + (d.getMonth() + 1) + '.' + d.getFullYear();
-                            }
-                        };
-                    }
+                _notesLoaded: {
+                    type: Boolean,
+                    value: false
                 }
             },
 
@@ -92,12 +76,11 @@
 
             listeners: {},
 
-            ready: function () {
-                if (!this._isChartLoaded) {
-                    this.$.timelineChart.showLoading();
+            attached: function () {
+                if (this._isChartLoaded() && !this._notesLoaded) {
+                    this.$.timelineChart.chart.showLoading();
                 }
             },
-
 
             /**
              * Called when backend data changes. Figures out what exactly
@@ -140,7 +123,11 @@
 
                 this._updateNavigatorSeries(event);
 
-                this.$.timelineChart.chart.hideLoading();
+                this._notesLoaded = true;
+
+                if (this._isChartLoaded()) {
+                    this.$.timelineChart.chart.hideLoading();
+                }
             },
 
             _projectsChanged: function (event) {
@@ -180,7 +167,7 @@
 
                 } else if (event.path === "notes") {
                     var navigatorNotes = event.base.slice();
-                    for(var i = 0; i < navigatorNotes; i++) {
+                    for (var i = 0; i < navigatorNotes; i++) {
                         navigatorNotes[i].project.name = "navigator";
                     }
 
@@ -229,6 +216,8 @@
                         id: projectNameAsId
                     }, redraw);
                 }
+
+                console.log("Add point " + JSON.stringify(newNote));
 
                 noteSeries.addPoint({
                     x: newNote.date,
@@ -283,6 +272,8 @@
                     });
                 }
 
+                console.log(newArray);
+
                 return newArray;
             },
 
@@ -290,7 +281,7 @@
                 this.fire('project-timeline-point-click', {
                     id: event.detail.point.noteId,
                     project: event.detail.point.series.name,
-                    date: new Date(event.detail.point.x),
+                    date: event.detail.point.x,
                     note: event.detail.point.name
                 });
             },
