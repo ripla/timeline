@@ -44,6 +44,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
 --><meta charset="UTF-8">
 
 
+
 </head><body><div hidden="" by-vulcanize=""><script>(function () {
 function resolve() {
 document.body.removeAttribute('unresolved');
@@ -60,30 +61,22 @@ addEventListener('DOMContentLoaded', resolve);
 }());
 window.Polymer = {
 Settings: function () {
-var user = window.Polymer || {};
+var settings = window.Polymer || {};
 var parts = location.search.slice(1).split('&');
 for (var i = 0, o; i < parts.length && (o = parts[i]); i++) {
 o = o.split('=');
-o[0] && (user[o[0]] = o[1] || true);
+o[0] && (settings[o[0]] = o[1] || true);
 }
-var wantShadow = user.dom === 'shadow';
-var hasShadow = Boolean(Element.prototype.createShadowRoot);
-var nativeShadow = hasShadow && !window.ShadowDOMPolyfill;
-var useShadow = wantShadow && hasShadow;
-var hasNativeImports = Boolean('import' in document.createElement('link'));
-var useNativeImports = hasNativeImports;
-var useNativeCustomElements = !window.CustomElements || window.CustomElements.useNative;
-var usePolyfillProto = !useNativeCustomElements && !Object.__proto__;
-return {
-wantShadow: wantShadow,
-hasShadow: hasShadow,
-nativeShadow: nativeShadow,
-useShadow: useShadow,
-useNativeShadow: useShadow && nativeShadow,
-useNativeImports: useNativeImports,
-useNativeCustomElements: useNativeCustomElements,
-usePolyfillProto: usePolyfillProto
-};
+settings.wantShadow = settings.dom === 'shadow';
+settings.hasShadow = Boolean(Element.prototype.createShadowRoot);
+settings.nativeShadow = settings.hasShadow && !window.ShadowDOMPolyfill;
+settings.useShadow = settings.wantShadow && settings.hasShadow;
+settings.hasNativeImports = Boolean('import' in document.createElement('link'));
+settings.useNativeImports = settings.hasNativeImports;
+settings.useNativeCustomElements = !window.CustomElements || window.CustomElements.useNative;
+settings.useNativeShadow = settings.useShadow && settings.nativeShadow;
+settings.usePolyfillProto = !settings.useNativeCustomElements && !Object.__proto__;
+return settings;
 }()
 };
 (function () {
@@ -210,6 +203,9 @@ Polymer.RenderStatus._catchFirstRender();
 }
 Polymer.ImportStatus = Polymer.RenderStatus;
 Polymer.ImportStatus.whenLoaded = Polymer.ImportStatus.whenReady;
+(function () {
+'use strict';
+var settings = Polymer.Settings;
 Polymer.Base = {
 __isPolymerInstance__: true,
 _addFeature: function (feature) {
@@ -219,13 +215,30 @@ registerCallback: function () {
 this._desugarBehaviors();
 this._doBehavior('beforeRegister');
 this._registerFeatures();
-this._doBehavior('registered');
+if (!settings.lazyRegister) {
+this.ensureRegisterFinished();
+}
 },
 createdCallback: function () {
+if (!this.__hasRegisterFinished) {
+this._ensureRegisterFinished(this.__proto__);
+}
 Polymer.telemetry.instanceCount++;
 this.root = this;
 this._doBehavior('created');
 this._initFeatures();
+},
+ensureRegisterFinished: function () {
+this._ensureRegisterFinished(this);
+},
+_ensureRegisterFinished: function (proto) {
+if (proto.__hasRegisterFinished !== proto.is) {
+proto.__hasRegisterFinished = proto.is;
+if (proto._finishRegisterFeatures) {
+proto._finishRegisterFeatures();
+}
+proto._doBehavior('registered');
+}
 },
 attachedCallback: function () {
 var self = this;
@@ -305,6 +318,7 @@ Polymer.isInstance = function (obj) {
 return Boolean(obj && obj.__isPolymerInstance__);
 };
 Polymer.telemetry.instanceCount = 0;
+}());
 (function () {
 var modules = {};
 var lcModules = {};
@@ -686,7 +700,7 @@ return value != null ? value : undefined;
 }
 }
 });
-Polymer.version = '1.3.1';
+Polymer.version = '1.4.0';
 Polymer.Base._addFeature({
 _registerFeatures: function () {
 this._prepIs();
@@ -2038,7 +2052,11 @@ get localTarget() {
 return this.event.target;
 },
 get path() {
-return this.event.path;
+var path = this.event.path;
+if (!Array.isArray(path)) {
+path = Array.prototype.slice.call(path);
+}
+return path;
 }
 };
 } else {
@@ -4501,7 +4519,12 @@ if (prop.notify) {
 this._addPropertyEffect(p, 'notify', { event: Polymer.CaseMap.camelToDashCase(p) + '-changed' });
 }
 if (prop.reflectToAttribute) {
-this._addPropertyEffect(p, 'reflect', { attribute: Polymer.CaseMap.camelToDashCase(p) });
+var attr = Polymer.CaseMap.camelToDashCase(p);
+if (attr[0] === '-') {
+this._warn(this._logf('_addPropertyEffects', 'Property ' + p + ' cannot be reflected to attribute ' + attr + ' because "-" is not a valid starting attribute name. Use a lowercase first letter for the property instead.'));
+} else {
+this._addPropertyEffect(p, 'reflect', { attribute: attr });
+}
 }
 if (prop.readOnly) {
 Polymer.Bind.ensurePropertyEffects(this, p);
@@ -4584,6 +4607,9 @@ var part = note.parts[i];
 if (part.signature) {
 this._addAnnotatedComputationEffect(note, part, index);
 } else if (!part.literal) {
+if (note.kind === 'attribute' && note.name[0] === '-') {
+this._warn(this._logf('_addAnnotationEffect', 'Cannot set attribute ' + note.name + ' because "-" is not a valid attribute starting character'));
+} else {
 this._addPropertyEffect(part.model, 'annotation', {
 kind: note.kind,
 index: index,
@@ -4596,6 +4622,7 @@ event: part.event,
 customEvent: part.customEvent,
 negate: part.negate
 });
+}
 }
 }
 },
@@ -5367,19 +5394,29 @@ this.forEachRule(r, styleRuleCallback, keyframesRuleCallback);
 }
 }
 },
-applyCss: function (cssText, moniker, target, afterNode) {
+applyCss: function (cssText, moniker, target, contextNode) {
+var style = this.createScopeStyle(cssText, moniker);
+target = target || document.head;
+var after = contextNode && contextNode.nextSibling || target.firstChild;
+this.__lastHeadApplyNode = style;
+return target.insertBefore(style, after);
+},
+createScopeStyle: function (cssText, moniker) {
 var style = document.createElement('style');
 if (moniker) {
 style.setAttribute('scope', moniker);
 }
 style.textContent = cssText;
-target = target || document.head;
-if (!afterNode) {
-var n$ = target.querySelectorAll('style[scope]');
-afterNode = n$[n$.length - 1];
-}
-target.insertBefore(style, afterNode && afterNode.nextSibling || target.firstChild);
 return style;
+},
+__lastHeadApplyNode: null,
+applyStylePlaceHolder: function (moniker) {
+var placeHolder = document.createComment(' Shady DOM styles for ' + moniker + ' ');
+var after = this.__lastHeadApplyNode ? this.__lastHeadApplyNode.nextSibling : null;
+var scope = document.head;
+scope.insertBefore(placeHolder, after || scope.firstChild);
+this.__lastHeadApplyNode = placeHolder;
+return placeHolder;
 },
 cssFromModules: function (moduleIds, warnIfNotFound) {
 var modules = moduleIds.trim().split(' ');
@@ -5697,20 +5734,20 @@ styleTransformer.element(element, this.is, this._scopeCssViaAttr);
 prepElement.call(this, element);
 },
 _prepStyles: function () {
-if (this._encapsulateStyle === undefined) {
-this._encapsulateStyle = !nativeShadow && Boolean(this._template);
+if (!nativeShadow) {
+this._scopeStyle = styleUtil.applyStylePlaceHolder(this.is);
 }
+},
+_prepShimStyles: function () {
 if (this._template) {
+if (this._encapsulateStyle === undefined) {
+this._encapsulateStyle = !nativeShadow;
+}
 this._styles = this._collectStyles();
 var cssText = styleTransformer.elementStyles(this);
 this._prepStyleProperties();
-var needsStatic = this._styles.length && !this._needsStyleProperties();
-if (needsStatic || !nativeShadow) {
-cssText = needsStatic ? cssText : ' ';
-var style = styleUtil.applyCss(cssText, this.is, nativeShadow ? this._template.content : null);
-if (!nativeShadow) {
-this._scopeStyle = style;
-}
+if (!this._needsStyleProperties() && this._styles.length) {
+styleUtil.applyCss(cssText, this.is, nativeShadow ? this._template.content : null, this._scopeStyle);
 }
 } else {
 this._styles = [];
@@ -6353,8 +6390,11 @@ Polymer.Base._addFeature({
 _registerFeatures: function () {
 this._prepIs();
 this._prepConstructor();
-this._prepTemplate();
 this._prepStyles();
+},
+_finishRegisterFeatures: function () {
+this._prepTemplate();
+this._prepShimStyles();
 this._prepAnnotations();
 this._prepEffects();
 this._prepBehaviors();
@@ -11599,6 +11639,87 @@ event and do your own custom submission:
 </script>
 
 
+<dom-module id="iron-a11y-announcer" assetpath="../bower_components/iron-a11y-announcer/">
+  <style>
+    :host {
+      display: inline-block;
+      position: fixed;
+      clip: rect(0px,0px,0px,0px);
+    }
+  </style>
+
+  <template>
+    <div aria-live$="[[mode]]">[[_text]]</div>
+  </template>
+
+  <script>
+
+    (function() {
+      'use strict';
+
+      Polymer.IronA11yAnnouncer = Polymer({
+        is: 'iron-a11y-announcer',
+
+        properties: {
+
+          /**
+           * The value of mode is used to set the `aria-live` attribute
+           * for the element that will be announced. Valid values are: `off`,
+           * `polite` and `assertive`.
+           */
+          mode: {
+            type: String,
+            value: 'polite'
+          },
+
+          _text: {
+            type: String,
+            value: ''
+          }
+        },
+
+        created: function() {
+          if (!Polymer.IronA11yAnnouncer.instance) {
+            Polymer.IronA11yAnnouncer.instance = this;
+          }
+
+          document.body.addEventListener('iron-announce', this._onIronAnnounce.bind(this));
+        },
+
+        /**
+         * Cause a text string to be announced by screen readers.
+         *
+         * @param {string} text The text that should be announced.
+         */
+        announce: function(text) {
+          this._text = '';
+          this.async(function() {
+            this._text = text;
+          }, 100);
+        },
+
+        _onIronAnnounce: function(event) {
+          if (event.detail && event.detail.text) {
+            this.announce(event.detail.text);
+          }
+        }
+      });
+
+      Polymer.IronA11yAnnouncer.instance = null;
+
+      Polymer.IronA11yAnnouncer.requestAvailability = function() {
+        if (!Polymer.IronA11yAnnouncer.instance) {
+          Polymer.IronA11yAnnouncer.instance = document.createElement('iron-a11y-announcer');
+        }
+
+        document.body.appendChild(Polymer.IronA11yAnnouncer.instance);
+      };
+    })();
+
+  </script>
+</dom-module>
+
+
 <script>
 
   (function() {
@@ -12057,18 +12178,22 @@ is separate from validation, and `allowed-pattern` does not affect how the input
       },
 
       /**
-       * Set to true to prevent the user from entering invalid input. The new input characters are
-       * matched with `allowedPattern` if it is set, otherwise it will use the `type` attribute (only
-       * supported for `type=number`).
+       * Set to true to prevent the user from entering invalid input. If `allowedPattern` is set,
+       * any character typed by the user will be matched against that pattern, and rejected if it's not a match.
+       * Pasted input will have each character checked individually; if any character
+       * doesn't match `allowedPattern`, the entire pasted string will be rejected.
+       * If `allowedPattern` is not set, it will use the `type` attribute (only supported for `type=number`).
        */
       preventInvalidInput: {
         type: Boolean
       },
 
       /**
-       * Regular expression expressing a set of characters to enforce the validity of input characters.
-       * The recommended value should follow this format: `[a-ZA-Z0-9.+-!;:]` that list the characters 
-       * allowed as input.
+       * Regular expression that list the characters allowed as input.
+       * This pattern represents the allowed characters for the field; as the user inputs text,
+       * each individual character will be checked against the pattern (rather than checking
+       * the entire value as a whole). The recommended format should be a list of allowed characters;
+       * for example, `[a-zA-Z0-9.+-!;:]`
        */
       allowedPattern: {
         type: String,
@@ -12090,6 +12215,46 @@ is separate from validation, and `allowed-pattern` does not affect how the input
     listeners: {
       'input': '_onInput',
       'keypress': '_onKeypress'
+    },
+
+    registered: function() {
+      // Feature detect whether we need to patch dispatchEvent (i.e. on FF and IE).
+      if (!this._canDispatchEventOnDisabled()) {
+        this._origDispatchEvent = this.dispatchEvent;
+        this.dispatchEvent = this._dispatchEventFirefoxIE;
+      }
+    },
+
+    created: function() {
+      Polymer.IronA11yAnnouncer.requestAvailability();
+    },
+
+    _canDispatchEventOnDisabled: function() {
+      var input = document.createElement('input');
+      var canDispatch = false;
+      input.disabled = true;
+
+      input.addEventListener('feature-check-dispatch-event', function() {
+        canDispatch = true;
+      });
+
+      try {
+        input.dispatchEvent(new Event('feature-check-dispatch-event'));
+      } catch(e) {}
+
+      return canDispatch;
+    },
+
+    _dispatchEventFirefoxIE: function() {
+      // Due to Firefox bug, events fired on disabled form controls can throw
+      // errors; furthermore, neither IE nor Firefox will actually dispatch
+      // events from disabled form controls; as such, we toggle disable around
+      // the dispatch to allow notifying properties to notify
+      // See issue #47 for details
+      var disabled = this.disabled;
+      this.disabled = false;
+      this._origDispatchEvent.apply(this, arguments);
+      this.disabled = disabled;
     },
 
     get _patternRegExp() {
@@ -12132,6 +12297,7 @@ is separate from validation, and `allowed-pattern` does not affect how the input
       if (this.preventInvalidInput && !this._patternAlreadyChecked) {
         var valid = this._checkPatternValidity();
         if (!valid) {
+          this._announceInvalidCharacter('Invalid string of characters not entered.');
           this.value = this._previousValidInput;
         }
       }
@@ -12192,6 +12358,7 @@ is separate from validation, and `allowed-pattern` does not affect how the input
       var thisChar = String.fromCharCode(event.charCode);
       if (this._isPrintable(event) && !regexp.test(thisChar)) {
         event.preventDefault();
+        this._announceInvalidCharacter('Invalid character ' + thisChar + ' not entered.');
       }
     },
 
@@ -12214,23 +12381,29 @@ is separate from validation, and `allowed-pattern` does not affect how the input
      * @return {boolean} True if the value is valid.
      */
     validate: function() {
-      // Empty, non-required input is valid.
-      if (!this.required && this.value == '') {
-        this.invalid = false;
-        return true;
+      // First, check what the browser thinks. Some inputs (like type=number)
+      // behave weirdly and will set the value to "" if something invalid is
+      // entered, but will set the validity correctly.
+      var valid =  this.checkValidity();
+
+      // Only do extra checking if the browser thought this was valid.
+      if (valid) {
+        // Empty, required input is invalid
+        if (this.required && this.value === '') {
+          valid = false;
+        } else if (this.hasValidator()) {
+          valid = Polymer.IronValidatableBehavior.validate.call(this, this.value);
+        }
       }
 
-      var valid;
-      if (this.hasValidator()) {
-        valid = Polymer.IronValidatableBehavior.validate.call(this, this.value);
-      } else {
-        valid = this.checkValidity();
-        this.invalid = !valid;
-      }
+      this.invalid = !valid;
       this.fire('iron-input-validate');
       return valid;
-    }
+    },
 
+    _announceInvalidCharacter: function(message) {
+      this.fire('iron-announce', { text: message });
+    }
   });
 
   /*
@@ -15583,12 +15756,6 @@ CSS properties               | Action
     this._overlays = [];
 
     /**
-     * Used to keep track of the last focused node before an overlay gets opened.
-     * @private {Array<Element>}
-     */
-    this._lastFocusedNodes = [];
-
-    /**
      * iframes have a default z-index of 100,
      * so this default should be at least that.
      * @private {number}
@@ -15596,16 +15763,18 @@ CSS properties               | Action
     this._minimumZ = 101;
 
     /**
-     * Used to keep track of the opened overlays with backdrop.
-     * @private {Array<Element>}
-     */
-    this._backdrops = [];
-
-    /**
      * Memoized backdrop element.
      * @private {Element|null}
      */
     this._backdropElement = null;
+
+    // Enable document-wide tap recognizer.
+    Polymer.Gestures.add(document, 'tap', null);
+    // We should be using only 'tap', but this would be a breaking change.
+    var tapEvent = ('ontouchstart' in window) ? 'tap' : 'click';
+    document.addEventListener(tapEvent, this._onCaptureClick.bind(this), true);
+    document.addEventListener('focus', this._onCaptureFocus.bind(this), true);
+    document.addEventListener('keydown', this._onCaptureKeyDown.bind(this), true);
   };
 
   Polymer.IronOverlayManagerClass.prototype = {
@@ -15625,52 +15794,57 @@ CSS properties               | Action
 
     /**
      * The deepest active element.
-     * @type {Element|undefined} activeElement the active element
+     * @type {Element} activeElement the active element
      */
     get deepActiveElement() {
-      var active = document.activeElement;
       // document.activeElement can be null
       // https://developer.mozilla.org/en-US/docs/Web/API/Document/activeElement
-      while (active && active.root && Polymer.dom(active.root).activeElement) {
+      // In case of null, default it to document.body.
+      var active = document.activeElement || document.body;
+      while (active.root && Polymer.dom(active.root).activeElement) {
         active = Polymer.dom(active.root).activeElement;
       }
       return active;
     },
 
     /**
-     * If a node is contained in an overlay.
-     * @param {Element=} node
-     * @return {boolean}
+     * Brings the overlay at the specified index to the front.
+     * @param {number} i
      * @private
      */
-    _isChildOfOverlay: function(node) {
-      while (node && node !== document.body) {
-        // Use logical parentNode, or native ShadowRoot host.
-        node = Polymer.dom(node).parentNode || node.host;
-        // Check if it is an overlay.
-        if (node && node.behaviors && node.behaviors.indexOf(Polymer.IronOverlayBehaviorImpl) !== -1) {
-          return true;
-        }
+    _bringOverlayAtIndexToFront: function(i) {
+      var overlay = this._overlays[i];
+      var lastI = this._overlays.length - 1;
+      // If already the top element, return.
+      if (!overlay || i === lastI) {
+        return;
       }
-      return false;
+      // Update z-index to be on top.
+      var minimumZ = Math.max(this.currentOverlayZ(), this._minimumZ);
+      if (this._getZ(overlay) <= minimumZ) {
+        this._applyOverlayZ(overlay, minimumZ);
+      }
+
+      // Shift other overlays behind the new on top.
+      while (i < lastI) {
+        this._overlays[i] = this._overlays[i + 1];
+        i++;
+      }
+      this._overlays[lastI] = overlay;
     },
 
     /**
+     * Adds the overlay and updates its z-index if it's opened, or removes it if it's closed.
+     * Also updates the backdrop z-index.
      * @param {Element} overlay
-     * @param {number} aboveZ
-     * @private
      */
-    _applyOverlayZ: function(overlay, aboveZ) {
-      this._setZ(overlay, aboveZ + 2);
-    },
-
-    /**
-     * @param {Element} element
-     * @param {number|string} z
-     * @private
-     */
-    _setZ: function(element, z) {
-      element.style.zIndex = z;
+    addOrRemoveOverlay: function(overlay) {
+      if (overlay.opened) {
+        this.addOverlay(overlay);
+      } else {
+        this.removeOverlay(overlay);
+      }
+      this.trackBackdrop();
     },
 
     /**
@@ -15678,6 +15852,11 @@ CSS properties               | Action
      * @param {Element} overlay
      */
     addOverlay: function(overlay) {
+      var i = this._overlays.indexOf(overlay);
+      if (i >= 0) {
+        this._bringOverlayAtIndexToFront(i);
+        return;
+      }
       var minimumZ = Math.max(this.currentOverlayZ(), this._minimumZ);
       this._overlays.push(overlay);
       var newZ = this.currentOverlayZ();
@@ -15685,11 +15864,7 @@ CSS properties               | Action
         this._applyOverlayZ(overlay, minimumZ);
       }
       var element = this.deepActiveElement;
-      // If already in other overlay, don't reset focus there.
-      if (this._isChildOfOverlay(element)) {
-        element = null;
-      }
-      this._lastFocusedNodes.push(element);
+      overlay.restoreFocusNode = this._overlayParent(element) ? null : element;
     },
 
     /**
@@ -15697,35 +15872,35 @@ CSS properties               | Action
      */
     removeOverlay: function(overlay) {
       var i = this._overlays.indexOf(overlay);
-      if (i >= 0) {
-        this._overlays.splice(i, 1);
-        this._setZ(overlay, '');
+      if (i === -1) {
+        return;
+      }
+      this._overlays.splice(i, 1);
+      this._setZ(overlay, '');
 
-        var node = this._lastFocusedNodes[i];
-        // Focus only if still contained in document.body
-        if (overlay.restoreFocusOnClose && node && Polymer.dom(document.body).deepContains(node)) {
-          node.focus();
-        }
-        this._lastFocusedNodes.splice(i, 1);
+      var node = overlay.restoreFocusOnClose ? overlay.restoreFocusNode : null;
+      overlay.restoreFocusNode = null;
+      // Focus back only if still contained in document.body
+      if (node && Polymer.dom(document.body).deepContains(node)) {
+        node.focus();
       }
     },
 
     /**
-     * @return {Element|undefined} overlay The current overlay.
+     * Returns the current overlay.
+     * @return {Element|undefined}
      */
     currentOverlay: function() {
       var i = this._overlays.length - 1;
-      while (this._overlays[i] && !this._overlays[i].opened) {
-        --i;
-      }
       return this._overlays[i];
     },
 
     /**
-     * @return {number} zIndex the current overlay z-index.
+     * Returns the current overlay z-index.
+     * @return {number}
      */
     currentOverlayZ: function() {
-      return this._getOverlayZ(this.currentOverlay());
+      return this._getZ(this.currentOverlay());
     },
 
     /**
@@ -15753,41 +15928,41 @@ CSS properties               | Action
     },
 
     /**
-     * @param {Element} overlay The overlay that updated its withBackdrop.
+     * Updates the backdrop z-index.
      */
-    trackBackdrop: function(overlay) {
-      var index = this._backdrops.indexOf(overlay);
-      if (overlay.opened && overlay.withBackdrop) {
-        // no duplicates
-        if (index === -1) {
-          this._backdrops.push(overlay);
-        }
-      } else if (index >= 0) {
-        this._backdrops.splice(index, 1);
-      }
+    trackBackdrop: function() {
+      this.backdropElement.style.zIndex = this.backdropZ();
     },
 
     /**
-     * @return {Array<Element>} backdrops
+     * @return {Array<Element>}
      */
     getBackdrops: function() {
-      return this._backdrops;
+      var backdrops = [];
+      for (var i = 0; i < this._overlays.length; i++) {
+        if (this._overlays[i].withBackdrop) {
+          backdrops.push(this._overlays[i]);
+        }
+      }
+      return backdrops;
     },
 
     /**
-     * @return {number} index The z-index for the backdrop.
+     * Returns the z-index for the backdrop.
+     * @return {number}
      */
     backdropZ: function() {
-      return this._getOverlayZ(this._overlayWithBackdrop()) - 1;
+      return this._getZ(this._overlayWithBackdrop()) - 1;
     },
 
     /**
-     * @return {Element|undefined} overlay The first opened overlay that has a backdrop.
+     * Returns the first opened overlay that has a backdrop.
+     * @return {Element|undefined}
      * @private
      */
     _overlayWithBackdrop: function() {
       for (var i = 0; i < this._overlays.length; i++) {
-        if (this._overlays[i].opened && this._overlays[i].withBackdrop) {
+        if (this._overlays[i].withBackdrop) {
           return this._overlays[i];
         }
       }
@@ -15798,7 +15973,7 @@ CSS properties               | Action
      * @param {Element=} overlay
      * @private
      */
-    _getOverlayZ: function(overlay) {
+    _getZ: function(overlay) {
       var z = this._minimumZ;
       if (overlay) {
         var z1 = Number(window.getComputedStyle(overlay).zIndex);
@@ -15809,6 +15984,84 @@ CSS properties               | Action
         }
       }
       return z;
+    },
+
+    /**
+     * @param {Element} element
+     * @param {number|string} z
+     * @private
+     */
+    _setZ: function(element, z) {
+      element.style.zIndex = z;
+    },
+
+    /**
+     * @param {Element} overlay
+     * @param {number} aboveZ
+     * @private
+     */
+    _applyOverlayZ: function(overlay, aboveZ) {
+      this._setZ(overlay, aboveZ + 2);
+    },
+
+    /**
+     * Returns the overlay containing the provided node. If the node is an overlay,
+     * it returns the node.
+     * @param {Element=} node
+     * @return {Element|undefined}
+     * @private
+     */
+    _overlayParent: function(node) {
+      while (node && node !== document.body) {
+        // Check if it is an overlay.
+        if (node._manager === this) {
+          return node;
+        }
+        // Use logical parentNode, or native ShadowRoot host.
+        node = Polymer.dom(node).parentNode || node.host;
+      }
+    },
+
+    /**
+     * Ensures the click event is delegated to the right overlay.
+     * @param {!Event} event
+     * @private
+     */
+    _onCaptureClick: function(event) {
+      var overlay = /** @type {?} */ (this.currentOverlay());
+      // Check if clicked outside of any overlay.
+      var target = /** @type {Element} */ (Polymer.dom(event).rootTarget);
+      if (overlay && this._overlayParent(target) !== overlay) {
+        overlay._onCaptureClick(event);
+      }
+    },
+
+    /**
+     * Ensures the focus event is delegated to the right overlay.
+     * @param {!Event} event
+     * @private
+     */
+    _onCaptureFocus: function(event) {
+      var overlay = /** @type {?} */ (this.currentOverlay());
+      if (overlay) {
+        overlay._onCaptureFocus(event);
+      }
+    },
+
+    /**
+     * Ensures TAB and ESC keyboard events are delegated to the right overlay.
+     * @param {!Event} event
+     * @private
+     */
+    _onCaptureKeyDown: function(event) {
+      var overlay = /** @type {?} */ (this.currentOverlay());
+      if (overlay) {
+        if (Polymer.IronA11yKeysBehavior.keyboardEventMatchesKeys(event, 'esc')) {
+          overlay._onCaptureEsc(event);
+        } else if (Polymer.IronA11yKeysBehavior.keyboardEventMatchesKeys(event, 'tab')) {
+          overlay._onCaptureTab(event);
+        }
+      }
     }
   };
 
@@ -15829,12 +16082,14 @@ CSS properties               | Action
       background-color: var(--iron-overlay-backdrop-background-color, #000);
       opacity: 0;
       transition: opacity 0.2s;
+      pointer-events: none;
 
       @apply(--iron-overlay-backdrop);
     }
 
     :host([opened]) {
       opacity: var(--iron-overlay-backdrop-opacity, 0.6);
+      pointer-events: auto;
 
       @apply(--iron-overlay-backdrop-opened);
     }
@@ -15882,8 +16137,6 @@ CSS properties               | Action
      * Appends the backdrop to document body and sets its `z-index` to be below the latest overlay.
      */
     prepare: function() {
-      // Always update z-index
-      this.style.zIndex = this._manager.backdropZ();
       if (!this.parentNode) {
         Polymer.dom(document.body).appendChild(this);
       }
@@ -15903,8 +16156,6 @@ CSS properties               | Action
      * Hides the backdrop if needed.
      */
     close: function() {
-      // Always update z-index
-      this.style.zIndex = this._manager.backdropZ();
       // close only if no element with backdrop is left
       if (this._manager.getBackdrops().length === 0) {
         // Read style before setting opened.
@@ -16044,15 +16295,6 @@ context. You should place this element as a child of `<body>` whenever possible.
       },
 
       /**
-       * The HTMLElement that will be firing relevant KeyboardEvents.
-       * Used for capturing esc and tab. Overridden from `IronA11yKeysBehavior`.
-       */
-      keyEventTarget: {
-        type: Object,
-        value: document
-      },
-
-      /**
        * Set to true to enable restoring of focus when overlay is closed.
        */
       restoreFocusOnClose: {
@@ -16070,20 +16312,6 @@ context. You should place this element as a child of `<body>` whenever possible.
         value: Polymer.IronOverlayManager
       },
 
-      _boundOnCaptureClick: {
-        type: Function,
-        value: function() {
-          return this._onCaptureClick.bind(this);
-        }
-      },
-
-      _boundOnCaptureFocus: {
-        type: Function,
-        value: function() {
-          return this._onCaptureFocus.bind(this);
-        }
-      },
-
       /**
        * The node being focused.
        * @type {?Node}
@@ -16092,11 +16320,6 @@ context. You should place this element as a child of `<body>` whenever possible.
         type: Object
       }
 
-    },
-
-    keyBindings: {
-      'esc': '__onEsc',
-      'tab': '__onTab'
     },
 
     listeners: {
@@ -16194,8 +16417,10 @@ context. You should place this element as a child of `<body>` whenever possible.
       Polymer.dom(this).unobserveNodes(this._observer);
       this._observer = null;
       this.opened = false;
-      this._manager.trackBackdrop(this);
-      this._manager.removeOverlay(this);
+      if (this.withBackdrop) {
+        // Allow user interactions right away.
+        this.backdropElement.close();
+      }
     },
 
     /**
@@ -16257,18 +16482,17 @@ context. You should place this element as a child of `<body>` whenever possible.
         return;
       }
 
-      this._manager.trackBackdrop(this);
+      this._manager.addOrRemoveOverlay(this);
 
       this.__isAnimating = true;
+
       if (this.opened) {
         this._prepareRenderOpened();
       }
-
       if (this._openChangedAsync) {
         this.cancelAsync(this._openChangedAsync);
       }
-      // Async here to allow overlay layer to become visible, and to avoid
-      // listeners to immediately close via a click.
+      // Async here to allow overlay layer to become visible.
       this._openChangedAsync = this.async(function() {
         // overlay becomes visible here
         this.style.display = '';
@@ -16280,7 +16504,6 @@ context. You should place this element as a child of `<body>` whenever possible.
         } else {
           this._renderClosed();
         }
-        this._toggleListeners();
         this._openChangedAsync = null;
       }, 1);
     },
@@ -16300,7 +16523,7 @@ context. You should place this element as a child of `<body>` whenever possible.
         this.__shouldRemoveTabIndex = false;
       }
       if (this.opened) {
-        this._manager.trackBackdrop(this);
+        this._manager.trackBackdrop();
         if (this.withBackdrop) {
           this.backdropElement.prepare();
           // Give time to be added to document.
@@ -16313,31 +16536,11 @@ context. You should place this element as a child of `<body>` whenever possible.
       }
     },
 
-    _toggleListener: function(enable, node, event, boundListener, capture) {
-      if (enable) {
-        // enable document-wide tap recognizer
-        if (event === 'tap') {
-          Polymer.Gestures.add(document, 'tap', null);
-        }
-        node.addEventListener(event, boundListener, capture);
-      } else {
-        // disable document-wide tap recognizer
-        if (event === 'tap') {
-          Polymer.Gestures.remove(document, 'tap', null);
-        }
-        node.removeEventListener(event, boundListener, capture);
-      }
-    },
-
-    _toggleListeners: function() {
-      this._toggleListener(this.opened, document, 'tap', this._boundOnCaptureClick, true);
-      this._toggleListener(this.opened, document, 'focus', this._boundOnCaptureFocus, true);
-    },
-
-    // tasks which must occur before opening; e.g. making the element visible
+    /**
+     * tasks which must occur before opening; e.g. making the element visible.
+     * @protected
+     */
     _prepareRenderOpened: function() {
-
-      this._manager.addOverlay(this);
 
       // Needed to calculate the size of the overlay so that transitions on its size
       // will have the correct starting points.
@@ -16356,8 +16559,10 @@ context. You should place this element as a child of `<body>` whenever possible.
       }
     },
 
-    // tasks which cause the overlay to actually open; typically play an
-    // animation
+    /**
+     * Tasks which cause the overlay to actually open; typically play an animation.
+     * @protected
+     */
     _renderOpened: function() {
       if (this.withBackdrop) {
         this.backdropElement.open();
@@ -16365,6 +16570,10 @@ context. You should place this element as a child of `<body>` whenever possible.
       this._finishRenderOpened();
     },
 
+    /**
+     * Tasks which cause the overlay to actually close; typically play an animation.
+     * @protected
+     */
     _renderClosed: function() {
       if (this.withBackdrop) {
         this.backdropElement.close();
@@ -16372,6 +16581,10 @@ context. You should place this element as a child of `<body>` whenever possible.
       this._finishRenderClosed();
     },
 
+    /**
+     * Tasks to be performed at the end of open action. Will fire `iron-overlay-opened`.
+     * @protected
+     */
     _finishRenderOpened: function() {
       // Focus the child node with [autofocus]
       this._applyFocus();
@@ -16381,10 +16594,13 @@ context. You should place this element as a child of `<body>` whenever possible.
       this.fire('iron-overlay-opened');
     },
 
+    /**
+     * Tasks to be performed at the end of close action. Will fire `iron-overlay-closed`.
+     * @protected
+     */
     _finishRenderClosed: function() {
       // Hide the overlay and remove the backdrop.
       this.style.display = 'none';
-      this._manager.removeOverlay(this);
 
       this._applyFocus();
 
@@ -16408,6 +16624,10 @@ context. You should place this element as a child of `<body>` whenever possible.
       this.style.transition = this.style.webkitTransition = '';
     },
 
+    /**
+     * Applies focus according to the opened state.
+     * @protected
+     */
     _applyFocus: function() {
       if (this.opened) {
         if (!this.noAutoFocus) {
@@ -16420,29 +16640,69 @@ context. You should place this element as a child of `<body>` whenever possible.
       }
     },
 
+    /**
+     * Cancels (closes) the overlay. Call when click happens outside the overlay.
+     * @param {!Event} event
+     * @protected
+     */
     _onCaptureClick: function(event) {
-      if (this._manager.currentOverlay() === this &&
-          Polymer.dom(event).path.indexOf(this) === -1) {
-        if (this.noCancelOnOutsideClick) {
-          this._applyFocus();
-        } else {
-          this.cancel(event);
-        }
+      if (!this.noCancelOnOutsideClick) {
+        this.cancel(event);
       }
     },
 
+    /**
+     * Keeps track of the focused child. If withBackdrop, traps focus within overlay.
+     * @param {!Event} event
+     * @protected
+     */
     _onCaptureFocus: function (event) {
-      if (this._manager.currentOverlay() === this && this.withBackdrop) {
-        var path = Polymer.dom(event).path;
-        if (path.indexOf(this) === -1) {
-          event.stopPropagation();
-          this._applyFocus();
-        } else {
-          this._focusedChild = path[0];
-        }
+      if (!this.withBackdrop) {
+        return;
+      }
+      var path = Polymer.dom(event).path;
+      if (path.indexOf(this) === -1) {
+        event.stopPropagation();
+        this._applyFocus();
+      } else {
+        this._focusedChild = path[0];
       }
     },
 
+    /**
+     * Handles the ESC key event and cancels (closes) the overlay.
+     * @param {!Event} event
+     * @protected
+     */
+    _onCaptureEsc: function(event) {
+      if (!this.noCancelOnEscKey) {
+        this.cancel(event);
+      }
+    },
+
+    /**
+     * Handles TAB key events to track focus changes.
+     * Will wrap focus for overlays withBackdrop.
+     * @param {!Event} event
+     * @protected
+     */
+    _onCaptureTab: function(event) {
+      // TAB wraps from last to first focusable.
+      // Shift + TAB wraps from first to last focusable.
+      var shift = event.shiftKey;
+      var nodeToCheck = shift ? this.__firstFocusableNode : this.__lastFocusableNode;
+      var nodeToSet = shift ? this.__lastFocusableNode : this.__firstFocusableNode;
+      if (this.withBackdrop && this._focusedChild === nodeToCheck) {
+        // We set here the _focusedChild so that _onCaptureFocus will handle the
+        // wrapping of the focus (the next event after tab is focus).
+        this._focusedChild = nodeToSet;
+      }
+    },
+
+    /**
+     * Refits if the overlay is opened and not animating.
+     * @protected
+     */
     _onIronResize: function() {
       if (this.__isAnimating) {
         return;
@@ -16454,9 +16714,9 @@ context. You should place this element as a child of `<body>` whenever possible.
     },
 
     /**
-     * @protected
      * Will call notifyResize if overlay is opened.
      * Can be overridden in order to avoid multiple observers on the same node.
+     * @protected
      */
     _onNodesChange: function() {
       if (this.opened && !this.__isAnimating) {
@@ -16466,38 +16726,11 @@ context. You should place this element as a child of `<body>` whenever possible.
       var focusableNodes = this._focusableNodes;
       this.__firstFocusableNode = focusableNodes[0];
       this.__lastFocusableNode = focusableNodes[focusableNodes.length - 1];
-    },
-
-    __onEsc: function(event) {
-      // Not opened or not on top, so return.
-      if (this._manager.currentOverlay() !== this) {
-        return;
-      }
-      if (!this.noCancelOnEscKey) {
-        this.cancel(event);
-      }
-    },
-
-    __onTab: function(event) {
-      // Not opened or not on top, so return.
-      if (this._manager.currentOverlay() !== this) {
-        return;
-      }
-      // TAB wraps from last to first focusable.
-      // Shift + TAB wraps from first to last focusable.
-      var shift = event.detail.keyboardEvent.shiftKey;
-      var nodeToCheck = shift ? this.__firstFocusableNode : this.__lastFocusableNode;
-      var nodeToSet = shift ? this.__lastFocusableNode : this.__firstFocusableNode;
-      if (this.withBackdrop && this._focusedChild === nodeToCheck) {
-        // We set here the _focusedChild so that _onCaptureFocus will handle the
-        // wrapping of the focus (the next event after tab is focus).
-        this._focusedChild = nodeToSet;
-      }
     }
   };
 
   /** @polymerBehavior */
-  Polymer.IronOverlayBehavior = [Polymer.IronA11yKeysBehavior, Polymer.IronFitBehavior, Polymer.IronResizableBehavior, Polymer.IronOverlayBehaviorImpl];
+  Polymer.IronOverlayBehavior = [Polymer.IronFitBehavior, Polymer.IronResizableBehavior, Polymer.IronOverlayBehaviorImpl];
 
   /**
   * Fired after the `iron-overlay` opens.
@@ -18333,7 +18566,7 @@ context. You should place this element as a child of `<body>` whenever possible.
 
       #monthGrid div[selected] {
         color: var(--vaadin-date-picker-selected-color, --light-primary-color);
-        background: var(--vaadin-date-picker-selected-background, --default-primary-color);
+        background: var(--vaadin-date-picker-selected-background, --primary-color);
         box-sizing: border-box;
         border-radius: 2px;
       }
@@ -18464,6 +18697,7 @@ context. You should place this element as a child of `<body>` whenever possible.
       margin-right: -40px;
       -webkit-overflow-scrolling: touch;
       -ms-overflow-style: none;
+      overflow-x: hidden;
     }
 
     #scroller.notouchscroll {
@@ -18593,6 +18827,13 @@ context. You should place this element as a child of `<body>` whenever possible.
         this._mayHaveMomentum = true;
       }
       this._preventScrollEvent = false;
+
+      this.debounce('scrollFinish', function() {
+        var scrollerRect = this.$.scroller.getBoundingClientRect();
+        if (!this._isVisible(this._buffers[0], scrollerRect) && !this._isVisible(this._buffers[1], scrollerRect)) {
+          this.position = this.position;
+        }
+      }, 200);
     },
 
     /**
@@ -18682,9 +18923,9 @@ context. You should place this element as a child of `<body>` whenever possible.
       }, this);
     },
 
-    _isVisible: function(itemWrapper, scrollerRect) {
-      var rect = itemWrapper.getBoundingClientRect();
-      return rect.bottom > scrollerRect.top && rect.top < scrollerRect.bottom;
+    _isVisible: function(element, container) {
+      var rect = element.getBoundingClientRect();
+      return rect.bottom > container.top && rect.top < container.bottom;
     },
 
     /**
@@ -18743,7 +18984,7 @@ context. You should place this element as a child of `<body>` whenever possible.
         @apply(--paper-font-button);
         @apply(--shadow-elevation-2dp);
         flex-shrink: 0;
-        color: var(--vaadin-date-picker-toolbar-color, --default-primary-color);
+        color: var(--vaadin-date-picker-toolbar-color, --primary-color);
         @apply(--vaadin-date-picker-toolbar);
       }
 
@@ -18752,7 +18993,7 @@ context. You should place this element as a child of `<body>` whenever possible.
       }
 
       #toolbar iron-icon {
-        fill: var(--vaadin-date-picker-toolbar-color, --default-primary-color);
+        fill: var(--vaadin-date-picker-toolbar-color, --primary-color);
         padding: 0px;
         transition: transform 200ms;
         --iron-icon-width: 20px;
@@ -18840,7 +19081,8 @@ context. You should place this element as a child of `<body>` whenever possible.
         /* Center the year scroller position. */
         --vaadin-infinite-scroller-buffer: {
           top: 50%;
-          margin-top: -37px;
+          margin-top: -25px;
+          width: 90px;
         }
       }
 
@@ -18860,18 +19102,6 @@ context. You should place this element as a child of `<body>` whenever possible.
         border-left-color: var(--vaadin-date-picker-background, --primary-background-color);
       }
 
-      #yearScroller div:after {
-        content: "• • • • • ";
-        display: block;
-        font-size: 18px;
-        line-height: 23px;
-        width: 9px;
-        margin: 6px auto;
-        opacity: 0.3;
-        white-space: normal;
-        @apply(--vaadin-date-picker-yearscroller-item);
-      }
-
       :host(.animate) vaadin-infinite-scroller {
         transition: all 200ms;
       }
@@ -18885,7 +19115,7 @@ context. You should place this element as a child of `<body>` whenever possible.
       }
 
       #header {
-        background: var(--vaadin-date-picker-header-background, --default-primary-color);
+        background: var(--vaadin-date-picker-header-background, --primary-color);
         padding: 0 14px 14px;
         display: flex;
         flex-shrink: 0;
@@ -18939,7 +19169,7 @@ context. You should place this element as a child of `<body>` whenever possible.
         background: var(--vaadin-date-picker-background, --primary-background-color);
         z-index: 2;
         box-shadow: 0 -1px 4px 0 rgba(0, 0, 0, 0.50);
-        color: var(--vaadin-date-picker-footer-color, --default-primary-color);
+        color: var(--vaadin-date-picker-footer-color, --primary-color);
         flex-shrink: 0;
         @apply(--vaadin-date-picker-footer);
       }
@@ -18966,9 +19196,10 @@ context. You should place this element as a child of `<body>` whenever possible.
           <vaadin-month-calendar i18n="[[i18n]]" month="[[_dateAfterXMonths(index)]]" selected-date="{{selectedDate}}" focused-date="[[focusedDate]]"></vaadin-month-calendar>
         </template>
       </vaadin-infinite-scroller>
-      <vaadin-infinite-scroller id="yearScroller" on-tap="_onYearTap" on-scroll="_onYearScroll" on-touchstart="_onYearScroll" item-height="150" buffer-size="10">
+      <vaadin-infinite-scroller id="yearScroller" on-tap="_onYearTap" on-scroll="_onYearScroll" on-touchstart="_onYearScroll" item-height="80" buffer-size="25">
         <template>
           <div>[[_yearAfterXYears(index)]]</div>
+          <div style="font-size: 18px; line-height: 56px; opacity: 0.3;">•</div>
         </template>
       </vaadin-infinite-scroller>
     </div>
@@ -19083,17 +19314,11 @@ context. You should place this element as a child of `<body>` whenever possible.
       _onMonthScroll: function(e) {
         this._visibleMonthIndex = Math.floor(this.$.scroller.position);
         this.$.yearScroller.position = this.$.scroller.position / 12;
-        if (e) {
-          e.stopPropagation();
-        }
       },
 
       _onYearScroll: function(e) {
         this.$.scroller.position = this.$.yearScroller.position * 12;
         this._visibleMonthIndex = Math.floor(this.$.scroller.position);
-        if (e) {
-          e.stopPropagation();
-        }
       },
 
       _formatDisplayed: function(date, formatDate) {
@@ -19161,7 +19386,10 @@ context. You should place this element as a child of `<body>` whenever possible.
             this.$.scroller.position = currentPos;
             window.requestAnimationFrame(smoothScroll);
           } else {
-            this.fire('scroll-animation-finished', {position: this._targetPosition, oldPosition: initialPosition});
+            this.fire('scroll-animation-finished', {
+              position: this._targetPosition,
+              oldPosition: initialPosition
+            });
             this.$.scroller.position = this._targetPosition;
             this._targetPosition = undefined;
           }
@@ -19283,46 +19511,49 @@ context. You should place this element as a child of `<body>` whenever possible.
       _onKeydown: function(e) {
         var focus = this._currentlyFocusedDate();
 
-        e.preventDefault();
+        var eventKey = this._eventKey(e);
+        if (eventKey) {
+          e.preventDefault();
 
-        switch (this._eventKey(e)) {
-          case 'down':
-            this._moveFocusByDays(7);
-            break;
-          case 'up':
-            this._moveFocusByDays(-7);
-            break;
-          case 'right':
-            this._moveFocusByDays(1);
-            break;
-          case 'left':
-            this._moveFocusByDays(-1);
-            break;
-          case 'enter':
-            if (this.focusedDate) {
-              this.selectedDate = this.focusedDate;
-            }
-            this._close();
-            break;
-          case 'space':
-            if (this._dateEquals(this.focusedDate, this.selectedDate)) {
-              this.selectedDate = '';
-            } else {
-              this.selectedDate = this.focusedDate;
-            }
-            break;
-          case 'home':
-            this.focusedDate = new Date(focus.getFullYear(), focus.getMonth(), 1);
-            break;
-          case 'end':
-            this.focusedDate = new Date(focus.getFullYear(), focus.getMonth() + 1, 0);
-            break;
-          case 'pagedown':
-            this._moveFocusByMonths(e.shiftKey ? 12 : 1);
-            break;
-          case 'pageup':
-            this._moveFocusByMonths(e.shiftKey ? -12 : -1);
-            break;
+          switch (eventKey) {
+            case 'down':
+              this._moveFocusByDays(7);
+              break;
+            case 'up':
+              this._moveFocusByDays(-7);
+              break;
+            case 'right':
+              this._moveFocusByDays(1);
+              break;
+            case 'left':
+              this._moveFocusByDays(-1);
+              break;
+            case 'enter':
+              if (this.focusedDate) {
+                this.selectedDate = this.focusedDate;
+              }
+              this._close();
+              break;
+            case 'space':
+              if (this._dateEquals(this.focusedDate, this.selectedDate)) {
+                this.selectedDate = '';
+              } else {
+                this.selectedDate = this.focusedDate;
+              }
+              break;
+            case 'home':
+              this.focusedDate = new Date(focus.getFullYear(), focus.getMonth(), 1);
+              break;
+            case 'end':
+              this.focusedDate = new Date(focus.getFullYear(), focus.getMonth() + 1, 0);
+              break;
+            case 'pagedown':
+              this._moveFocusByMonths(e.shiftKey ? 12 : 1);
+              break;
+            case 'pageup':
+              this._moveFocusByMonths(e.shiftKey ? -12 : -1);
+              break;
+          }
         }
       },
 
@@ -19452,11 +19683,11 @@ context. You should place this element as a child of `<body>` whenever possible.
       }
     </style>
 
-    <paper-input-container id="inputcontainer" hideclear$="[[_hideClearIcon(_selectedDate, _opened, _fullscreen)]]" tabindex$="[[_getTabIndex(disabled, readonly)]]" on-touchend="_preventDefault" on-tap="open" on-keydown="_onKeydown" disabled$="[[disabled]]" readonly$="[[readonly]]" opened$="[[_opened]]">
+    <paper-input-container id="inputcontainer" hideclear$="[[_hideClearIcon(_selectedDate, _opened, _fullscreen)]]" tabindex$="[[_getTabIndex(disabled, readonly)]]" on-touchend="_preventDefault" on-tap="open" on-keydown="_onKeydown" disabled$="[[disabled]]" opened$="[[_opened]]" auto-validate$="[[autoValidate]]">
       <label id="label">[[label]]</label>
-      <input id="input" is="iron-input" autocomplete="off" bind-value="[[_formatDisplayed(_selectedDate, i18n.formatDate)]]" type="text" invalid="[[invalid]]" name$="[[name]]" required$="[[required]]" tabindex="-1" on-focus="_focusInputContainer">
+      <input id="input" is="iron-input" autocomplete="off" bind-value="[[_formatDisplayed(_selectedDate, i18n.formatDate)]]" type="text" invalid="[[invalid]]" name$="[[name]]" required$="[[required]]" tabindex="-1" on-focus="_focusInputContainer" validator="[[validator]]" readonly$="[[readonly]]" disabled$="[[disabled]]">
 
-      <div suffix="" id="clear" on-tap="_clear" hidden$="[[_hideClearIcon(value, opened)]]">
+      <div suffix="" id="clear" on-tap="_clear">
         <iron-icon icon="clear"></iron-icon>
         <paper-ripple class="circle" center=""></paper-ripple>
       </div>
@@ -19537,30 +19768,46 @@ context. You should place this element as a child of `<body>` whenever possible.
 
         /**
          * The object used to localize this component.
+         * To change the default localization, replace the entire
+         * _i18n_ object or just the property you want to modify.
          *
-         * `i18n.monthNames`
+         * The object has the following JSON structure and default values:
+
+      {
+        // An array with the full names of months starting
+        // with January.
+        monthNames: [
+          'January', 'February', 'March', 'April', 'May',
+          'June', 'July', 'August', 'September',
+          'October', 'November', 'December'
+        ],
+
+        // An array with the short names of days starting
+        // with Sunday.
+        weekdaysShort: [
+          'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'
+        ],
+
+        // An integer indicating the first day of the week
+        // (0 = Sunday, 1 = Monday, etc.).
+        firstDayOfWeek: 0,
+
+        // Translation of the Today shortcut button text.
+        today: 'Today',
+
+        // Translation of the Cancel button text.
+        cancel: 'Cancel',
+
+        // A function to format given `Date` object as
+        // string.
+        formatDate: function(d) {
+          // returns a string representation of the given
+          // Date object in 'MM/DD/YYYY' -format
+        }
+      }
+
          *
-         *  An array with the full names of months starting with January.
-         *
-         * `i18n.weekdaysShort`
-         *
-         *  An array with the short names of days starting with Sunday.
-         *
-         * `i18n.firstDayOfWeek`
-         *
-         *  An integer indicating the first day of the week (0 = Sunday, 1 = Monday, etc.).
-         *
-         * `i18n.today`
-         *
-         *  Translation of the Today shortcut button text.
-         *
-         * `i18n.cancel`
-         *
-         *  Translation of the Cancel button text.
-         *
-         * `i18n.formatDate`
-         *
-         *  A function to format given `Date` object as `String`.
+         * @default {English/US}
          */
         i18n: {
           type: Object,
@@ -19572,8 +19819,8 @@ context. You should place this element as a child of `<body>` whenever possible.
               ],
               weekdaysShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
               firstDayOfWeek: 0,
-              today: 'today',
-              cancel: 'cancel',
+              today: 'Today',
+              cancel: 'Cancel',
               formatDate: function(d) {
                 return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
               }
@@ -19596,6 +19843,10 @@ context. You should place this element as a child of `<body>` whenever possible.
           type: Boolean,
           value: false
         }
+      },
+
+      created: function() {
+        this._boundOnScroll = this._onScroll.bind(this);
       },
 
       /**
@@ -19690,7 +19941,7 @@ context. You should place this element as a child of `<body>` whenever possible.
           this.$.overlay.initialPosition || this._parseDate(this.initialPosition) || new Date();
         this.$.overlay.scrollToDate(this.$.overlay.focusedDate || this.$.overlay.initialPosition);
 
-        this.listen(window, 'scroll', '_onWindowScroll');
+        window.addEventListener('scroll', this._boundOnScroll, true);
 
         // Checking if the browser supports webkitOverflowScrolling
         if (document.createElement('div').style.webkitOverflowScrolling === '') {
@@ -19722,7 +19973,8 @@ context. You should place this element as a child of `<body>` whenever possible.
       },
 
       _onOverlayClosed: function() {
-        this.unlisten(window, 'scroll', '_onWindowScroll');
+        window.removeEventListener('scroll', this._boundOnScroll, true);
+
         this.$.inputcontainer.focus();
 
         if (this._touchPrevented) {
@@ -19739,11 +19991,13 @@ context. You should place this element as a child of `<body>` whenever possible.
         this._onOverlayClosed();
       },
 
-      _onWindowScroll: function() {
-        this.$.dropdown.style.bottom = 'auto';
-        this.$.dropdown.resetFit();
-        this._updateAlignmentAndPosition();
-        this.$.dropdown.fire('iron-resize');
+      _onScroll: function(e) {
+        if (e.target === window || !this.$.overlay.contains(e.target)) {
+          this.$.dropdown.style.bottom = 'auto';
+          this.$.dropdown.resetFit();
+          this._updateAlignmentAndPosition();
+          this.$.dropdown.fire('iron-resize');
+        }
       },
 
       _toggle: function(e) {
@@ -19777,7 +20031,7 @@ context. You should place this element as a child of `<body>` whenever possible.
        * @return {boolean}
        */
       _getValidity: function() {
-        return this.disabled || !this.required || Boolean(this.value);
+        return this.$.input.validate();
       },
 
       _focusInputContainer: function() {
@@ -19945,7 +20199,6 @@ context. You should place this element as a child of `<body>` whenever possible.
             margin-top: 0;
             z-index: 10000;
             visibility: visible;
-            position: absolute;
         }
 
         #header  {
@@ -20235,6 +20488,14 @@ context. You should place this element as a child of `<body>` whenever possible.
         });
     </script>
 </dom-module>
+<style>
+/*!
+ *  Font Awesome 4.5.0 by @davegandy - http://fontawesome.io - @fontawesome
+ *  License - http://fontawesome.io/license (Font: SIL OFL 1.1, CSS: MIT License)
+ */@font-face{font-family:'FontAwesome';src:url("../bower_components/font-awesome/fonts/fontawesome-webfont.eot?v=4.5.0");src:url("../bower_components/font-awesome/fonts/fontawesome-webfont.eot?#iefix&v=4.5.0") format('embedded-opentype'),url("../bower_components/font-awesome/fonts/fontawesome-webfont.woff2?v=4.5.0") format('woff2'),url("../bower_components/font-awesome/fonts/fontawesome-webfont.woff?v=4.5.0") format('woff'),url("../bower_components/font-awesome/fonts/fontawesome-webfont.ttf?v=4.5.0") format('truetype'),url("../bower_components/font-awesome/fonts/fontawesome-webfont.svg?v=4.5.0#fontawesomeregular") format('svg');font-weight:normal;font-style:normal}.fa{display:inline-block;font:normal normal normal 14px/1 FontAwesome;font-size:inherit;text-rendering:auto;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}.fa-lg{font-size:1.33333333em;line-height:.75em;vertical-align:-15%}.fa-2x{font-size:2em}.fa-3x{font-size:3em}.fa-4x{font-size:4em}.fa-5x{font-size:5em}.fa-fw{width:1.28571429em;text-align:center}.fa-ul{padding-left:0;margin-left:2.14285714em;list-style-type:none}.fa-ul>li{position:relative}.fa-li{position:absolute;left:-2.14285714em;width:2.14285714em;top:.14285714em;text-align:center}.fa-li.fa-lg{left:-1.85714286em}.fa-border{padding:.2em .25em .15em;border:solid .08em #eee;border-radius:.1em}.fa-pull-left{float:left}.fa-pull-right{float:right}.fa.fa-pull-left{margin-right:.3em}.fa.fa-pull-right{margin-left:.3em}.pull-right{float:right}.pull-left{float:left}.fa.pull-left{margin-right:.3em}.fa.pull-right{margin-left:.3em}.fa-spin{-webkit-animation:fa-spin 2s infinite linear;animation:fa-spin 2s infinite linear}.fa-pulse{-webkit-animation:fa-spin 1s infinite steps(8);animation:fa-spin 1s infinite steps(8)}@-webkit-keyframes fa-spin{0%{-webkit-transform:rotate(0deg);transform:rotate(0deg)}100%{-webkit-transform:rotate(359deg);transform:rotate(359deg)}}@keyframes fa-spin{0%{-webkit-transform:rotate(0deg);transform:rotate(0deg)}100%{-webkit-transform:rotate(359deg);transform:rotate(359deg)}}.fa-rotate-90{filter:progid:DXImageTransform.Microsoft.BasicImage(rotation=1);-webkit-transform:rotate(90deg);-ms-transform:rotate(90deg);transform:rotate(90deg)}.fa-rotate-180{filter:progid:DXImageTransform.Microsoft.BasicImage(rotation=2);-webkit-transform:rotate(180deg);-ms-transform:rotate(180deg);transform:rotate(180deg)}.fa-rotate-270{filter:progid:DXImageTransform.Microsoft.BasicImage(rotation=3);-webkit-transform:rotate(270deg);-ms-transform:rotate(270deg);transform:rotate(270deg)}.fa-flip-horizontal{filter:progid:DXImageTransform.Microsoft.BasicImage(rotation=0, mirror=1);-webkit-transform:scale(-1, 1);-ms-transform:scale(-1, 1);transform:scale(-1, 1)}.fa-flip-vertical{filter:progid:DXImageTransform.Microsoft.BasicImage(rotation=2, mirror=1);-webkit-transform:scale(1, -1);-ms-transform:scale(1, -1);transform:scale(1, -1)}:root .fa-rotate-90,:root .fa-rotate-180,:root .fa-rotate-270,:root .fa-flip-horizontal,:root .fa-flip-vertical{filter:none}.fa-stack{position:relative;display:inline-block;width:2em;height:2em;line-height:2em;vertical-align:middle}.fa-stack-1x,.fa-stack-2x{position:absolute;left:0;width:100%;text-align:center}.fa-stack-1x{line-height:inherit}.fa-stack-2x{font-size:2em}.fa-inverse{color:#fff}.fa-glass:before{content:"\f000"}.fa-music:before{content:"\f001"}.fa-search:before{content:"\f002"}.fa-envelope-o:before{content:"\f003"}.fa-heart:before{content:"\f004"}.fa-star:before{content:"\f005"}.fa-star-o:before{content:"\f006"}.fa-user:before{content:"\f007"}.fa-film:before{content:"\f008"}.fa-th-large:before{content:"\f009"}.fa-th:before{content:"\f00a"}.fa-th-list:before{content:"\f00b"}.fa-check:before{content:"\f00c"}.fa-remove:before,.fa-close:before,.fa-times:before{content:"\f00d"}.fa-search-plus:before{content:"\f00e"}.fa-search-minus:before{content:"\f010"}.fa-power-off:before{content:"\f011"}.fa-signal:before{content:"\f012"}.fa-gear:before,.fa-cog:before{content:"\f013"}.fa-trash-o:before{content:"\f014"}.fa-home:before{content:"\f015"}.fa-file-o:before{content:"\f016"}.fa-clock-o:before{content:"\f017"}.fa-road:before{content:"\f018"}.fa-download:before{content:"\f019"}.fa-arrow-circle-o-down:before{content:"\f01a"}.fa-arrow-circle-o-up:before{content:"\f01b"}.fa-inbox:before{content:"\f01c"}.fa-play-circle-o:before{content:"\f01d"}.fa-rotate-right:before,.fa-repeat:before{content:"\f01e"}.fa-refresh:before{content:"\f021"}.fa-list-alt:before{content:"\f022"}.fa-lock:before{content:"\f023"}.fa-flag:before{content:"\f024"}.fa-headphones:before{content:"\f025"}.fa-volume-off:before{content:"\f026"}.fa-volume-down:before{content:"\f027"}.fa-volume-up:before{content:"\f028"}.fa-qrcode:before{content:"\f029"}.fa-barcode:before{content:"\f02a"}.fa-tag:before{content:"\f02b"}.fa-tags:before{content:"\f02c"}.fa-book:before{content:"\f02d"}.fa-bookmark:before{content:"\f02e"}.fa-print:before{content:"\f02f"}.fa-camera:before{content:"\f030"}.fa-font:before{content:"\f031"}.fa-bold:before{content:"\f032"}.fa-italic:before{content:"\f033"}.fa-text-height:before{content:"\f034"}.fa-text-width:before{content:"\f035"}.fa-align-left:before{content:"\f036"}.fa-align-center:before{content:"\f037"}.fa-align-right:before{content:"\f038"}.fa-align-justify:before{content:"\f039"}.fa-list:before{content:"\f03a"}.fa-dedent:before,.fa-outdent:before{content:"\f03b"}.fa-indent:before{content:"\f03c"}.fa-video-camera:before{content:"\f03d"}.fa-photo:before,.fa-image:before,.fa-picture-o:before{content:"\f03e"}.fa-pencil:before{content:"\f040"}.fa-map-marker:before{content:"\f041"}.fa-adjust:before{content:"\f042"}.fa-tint:before{content:"\f043"}.fa-edit:before,.fa-pencil-square-o:before{content:"\f044"}.fa-share-square-o:before{content:"\f045"}.fa-check-square-o:before{content:"\f046"}.fa-arrows:before{content:"\f047"}.fa-step-backward:before{content:"\f048"}.fa-fast-backward:before{content:"\f049"}.fa-backward:before{content:"\f04a"}.fa-play:before{content:"\f04b"}.fa-pause:before{content:"\f04c"}.fa-stop:before{content:"\f04d"}.fa-forward:before{content:"\f04e"}.fa-fast-forward:before{content:"\f050"}.fa-step-forward:before{content:"\f051"}.fa-eject:before{content:"\f052"}.fa-chevron-left:before{content:"\f053"}.fa-chevron-right:before{content:"\f054"}.fa-plus-circle:before{content:"\f055"}.fa-minus-circle:before{content:"\f056"}.fa-times-circle:before{content:"\f057"}.fa-check-circle:before{content:"\f058"}.fa-question-circle:before{content:"\f059"}.fa-info-circle:before{content:"\f05a"}.fa-crosshairs:before{content:"\f05b"}.fa-times-circle-o:before{content:"\f05c"}.fa-check-circle-o:before{content:"\f05d"}.fa-ban:before{content:"\f05e"}.fa-arrow-left:before{content:"\f060"}.fa-arrow-right:before{content:"\f061"}.fa-arrow-up:before{content:"\f062"}.fa-arrow-down:before{content:"\f063"}.fa-mail-forward:before,.fa-share:before{content:"\f064"}.fa-expand:before{content:"\f065"}.fa-compress:before{content:"\f066"}.fa-plus:before{content:"\f067"}.fa-minus:before{content:"\f068"}.fa-asterisk:before{content:"\f069"}.fa-exclamation-circle:before{content:"\f06a"}.fa-gift:before{content:"\f06b"}.fa-leaf:before{content:"\f06c"}.fa-fire:before{content:"\f06d"}.fa-eye:before{content:"\f06e"}.fa-eye-slash:before{content:"\f070"}.fa-warning:before,.fa-exclamation-triangle:before{content:"\f071"}.fa-plane:before{content:"\f072"}.fa-calendar:before{content:"\f073"}.fa-random:before{content:"\f074"}.fa-comment:before{content:"\f075"}.fa-magnet:before{content:"\f076"}.fa-chevron-up:before{content:"\f077"}.fa-chevron-down:before{content:"\f078"}.fa-retweet:before{content:"\f079"}.fa-shopping-cart:before{content:"\f07a"}.fa-folder:before{content:"\f07b"}.fa-folder-open:before{content:"\f07c"}.fa-arrows-v:before{content:"\f07d"}.fa-arrows-h:before{content:"\f07e"}.fa-bar-chart-o:before,.fa-bar-chart:before{content:"\f080"}.fa-twitter-square:before{content:"\f081"}.fa-facebook-square:before{content:"\f082"}.fa-camera-retro:before{content:"\f083"}.fa-key:before{content:"\f084"}.fa-gears:before,.fa-cogs:before{content:"\f085"}.fa-comments:before{content:"\f086"}.fa-thumbs-o-up:before{content:"\f087"}.fa-thumbs-o-down:before{content:"\f088"}.fa-star-half:before{content:"\f089"}.fa-heart-o:before{content:"\f08a"}.fa-sign-out:before{content:"\f08b"}.fa-linkedin-square:before{content:"\f08c"}.fa-thumb-tack:before{content:"\f08d"}.fa-external-link:before{content:"\f08e"}.fa-sign-in:before{content:"\f090"}.fa-trophy:before{content:"\f091"}.fa-github-square:before{content:"\f092"}.fa-upload:before{content:"\f093"}.fa-lemon-o:before{content:"\f094"}.fa-phone:before{content:"\f095"}.fa-square-o:before{content:"\f096"}.fa-bookmark-o:before{content:"\f097"}.fa-phone-square:before{content:"\f098"}.fa-twitter:before{content:"\f099"}.fa-facebook-f:before,.fa-facebook:before{content:"\f09a"}.fa-github:before{content:"\f09b"}.fa-unlock:before{content:"\f09c"}.fa-credit-card:before{content:"\f09d"}.fa-feed:before,.fa-rss:before{content:"\f09e"}.fa-hdd-o:before{content:"\f0a0"}.fa-bullhorn:before{content:"\f0a1"}.fa-bell:before{content:"\f0f3"}.fa-certificate:before{content:"\f0a3"}.fa-hand-o-right:before{content:"\f0a4"}.fa-hand-o-left:before{content:"\f0a5"}.fa-hand-o-up:before{content:"\f0a6"}.fa-hand-o-down:before{content:"\f0a7"}.fa-arrow-circle-left:before{content:"\f0a8"}.fa-arrow-circle-right:before{content:"\f0a9"}.fa-arrow-circle-up:before{content:"\f0aa"}.fa-arrow-circle-down:before{content:"\f0ab"}.fa-globe:before{content:"\f0ac"}.fa-wrench:before{content:"\f0ad"}.fa-tasks:before{content:"\f0ae"}.fa-filter:before{content:"\f0b0"}.fa-briefcase:before{content:"\f0b1"}.fa-arrows-alt:before{content:"\f0b2"}.fa-group:before,.fa-users:before{content:"\f0c0"}.fa-chain:before,.fa-link:before{content:"\f0c1"}.fa-cloud:before{content:"\f0c2"}.fa-flask:before{content:"\f0c3"}.fa-cut:before,.fa-scissors:before{content:"\f0c4"}.fa-copy:before,.fa-files-o:before{content:"\f0c5"}.fa-paperclip:before{content:"\f0c6"}.fa-save:before,.fa-floppy-o:before{content:"\f0c7"}.fa-square:before{content:"\f0c8"}.fa-navicon:before,.fa-reorder:before,.fa-bars:before{content:"\f0c9"}.fa-list-ul:before{content:"\f0ca"}.fa-list-ol:before{content:"\f0cb"}.fa-strikethrough:before{content:"\f0cc"}.fa-underline:before{content:"\f0cd"}.fa-table:before{content:"\f0ce"}.fa-magic:before{content:"\f0d0"}.fa-truck:before{content:"\f0d1"}.fa-pinterest:before{content:"\f0d2"}.fa-pinterest-square:before{content:"\f0d3"}.fa-google-plus-square:before{content:"\f0d4"}.fa-google-plus:before{content:"\f0d5"}.fa-money:before{content:"\f0d6"}.fa-caret-down:before{content:"\f0d7"}.fa-caret-up:before{content:"\f0d8"}.fa-caret-left:before{content:"\f0d9"}.fa-caret-right:before{content:"\f0da"}.fa-columns:before{content:"\f0db"}.fa-unsorted:before,.fa-sort:before{content:"\f0dc"}.fa-sort-down:before,.fa-sort-desc:before{content:"\f0dd"}.fa-sort-up:before,.fa-sort-asc:before{content:"\f0de"}.fa-envelope:before{content:"\f0e0"}.fa-linkedin:before{content:"\f0e1"}.fa-rotate-left:before,.fa-undo:before{content:"\f0e2"}.fa-legal:before,.fa-gavel:before{content:"\f0e3"}.fa-dashboard:before,.fa-tachometer:before{content:"\f0e4"}.fa-comment-o:before{content:"\f0e5"}.fa-comments-o:before{content:"\f0e6"}.fa-flash:before,.fa-bolt:before{content:"\f0e7"}.fa-sitemap:before{content:"\f0e8"}.fa-umbrella:before{content:"\f0e9"}.fa-paste:before,.fa-clipboard:before{content:"\f0ea"}.fa-lightbulb-o:before{content:"\f0eb"}.fa-exchange:before{content:"\f0ec"}.fa-cloud-download:before{content:"\f0ed"}.fa-cloud-upload:before{content:"\f0ee"}.fa-user-md:before{content:"\f0f0"}.fa-stethoscope:before{content:"\f0f1"}.fa-suitcase:before{content:"\f0f2"}.fa-bell-o:before{content:"\f0a2"}.fa-coffee:before{content:"\f0f4"}.fa-cutlery:before{content:"\f0f5"}.fa-file-text-o:before{content:"\f0f6"}.fa-building-o:before{content:"\f0f7"}.fa-hospital-o:before{content:"\f0f8"}.fa-ambulance:before{content:"\f0f9"}.fa-medkit:before{content:"\f0fa"}.fa-fighter-jet:before{content:"\f0fb"}.fa-beer:before{content:"\f0fc"}.fa-h-square:before{content:"\f0fd"}.fa-plus-square:before{content:"\f0fe"}.fa-angle-double-left:before{content:"\f100"}.fa-angle-double-right:before{content:"\f101"}.fa-angle-double-up:before{content:"\f102"}.fa-angle-double-down:before{content:"\f103"}.fa-angle-left:before{content:"\f104"}.fa-angle-right:before{content:"\f105"}.fa-angle-up:before{content:"\f106"}.fa-angle-down:before{content:"\f107"}.fa-desktop:before{content:"\f108"}.fa-laptop:before{content:"\f109"}.fa-tablet:before{content:"\f10a"}.fa-mobile-phone:before,.fa-mobile:before{content:"\f10b"}.fa-circle-o:before{content:"\f10c"}.fa-quote-left:before{content:"\f10d"}.fa-quote-right:before{content:"\f10e"}.fa-spinner:before{content:"\f110"}.fa-circle:before{content:"\f111"}.fa-mail-reply:before,.fa-reply:before{content:"\f112"}.fa-github-alt:before{content:"\f113"}.fa-folder-o:before{content:"\f114"}.fa-folder-open-o:before{content:"\f115"}.fa-smile-o:before{content:"\f118"}.fa-frown-o:before{content:"\f119"}.fa-meh-o:before{content:"\f11a"}.fa-gamepad:before{content:"\f11b"}.fa-keyboard-o:before{content:"\f11c"}.fa-flag-o:before{content:"\f11d"}.fa-flag-checkered:before{content:"\f11e"}.fa-terminal:before{content:"\f120"}.fa-code:before{content:"\f121"}.fa-mail-reply-all:before,.fa-reply-all:before{content:"\f122"}.fa-star-half-empty:before,.fa-star-half-full:before,.fa-star-half-o:before{content:"\f123"}.fa-location-arrow:before{content:"\f124"}.fa-crop:before{content:"\f125"}.fa-code-fork:before{content:"\f126"}.fa-unlink:before,.fa-chain-broken:before{content:"\f127"}.fa-question:before{content:"\f128"}.fa-info:before{content:"\f129"}.fa-exclamation:before{content:"\f12a"}.fa-superscript:before{content:"\f12b"}.fa-subscript:before{content:"\f12c"}.fa-eraser:before{content:"\f12d"}.fa-puzzle-piece:before{content:"\f12e"}.fa-microphone:before{content:"\f130"}.fa-microphone-slash:before{content:"\f131"}.fa-shield:before{content:"\f132"}.fa-calendar-o:before{content:"\f133"}.fa-fire-extinguisher:before{content:"\f134"}.fa-rocket:before{content:"\f135"}.fa-maxcdn:before{content:"\f136"}.fa-chevron-circle-left:before{content:"\f137"}.fa-chevron-circle-right:before{content:"\f138"}.fa-chevron-circle-up:before{content:"\f139"}.fa-chevron-circle-down:before{content:"\f13a"}.fa-html5:before{content:"\f13b"}.fa-css3:before{content:"\f13c"}.fa-anchor:before{content:"\f13d"}.fa-unlock-alt:before{content:"\f13e"}.fa-bullseye:before{content:"\f140"}.fa-ellipsis-h:before{content:"\f141"}.fa-ellipsis-v:before{content:"\f142"}.fa-rss-square:before{content:"\f143"}.fa-play-circle:before{content:"\f144"}.fa-ticket:before{content:"\f145"}.fa-minus-square:before{content:"\f146"}.fa-minus-square-o:before{content:"\f147"}.fa-level-up:before{content:"\f148"}.fa-level-down:before{content:"\f149"}.fa-check-square:before{content:"\f14a"}.fa-pencil-square:before{content:"\f14b"}.fa-external-link-square:before{content:"\f14c"}.fa-share-square:before{content:"\f14d"}.fa-compass:before{content:"\f14e"}.fa-toggle-down:before,.fa-caret-square-o-down:before{content:"\f150"}.fa-toggle-up:before,.fa-caret-square-o-up:before{content:"\f151"}.fa-toggle-right:before,.fa-caret-square-o-right:before{content:"\f152"}.fa-euro:before,.fa-eur:before{content:"\f153"}.fa-gbp:before{content:"\f154"}.fa-dollar:before,.fa-usd:before{content:"\f155"}.fa-rupee:before,.fa-inr:before{content:"\f156"}.fa-cny:before,.fa-rmb:before,.fa-yen:before,.fa-jpy:before{content:"\f157"}.fa-ruble:before,.fa-rouble:before,.fa-rub:before{content:"\f158"}.fa-won:before,.fa-krw:before{content:"\f159"}.fa-bitcoin:before,.fa-btc:before{content:"\f15a"}.fa-file:before{content:"\f15b"}.fa-file-text:before{content:"\f15c"}.fa-sort-alpha-asc:before{content:"\f15d"}.fa-sort-alpha-desc:before{content:"\f15e"}.fa-sort-amount-asc:before{content:"\f160"}.fa-sort-amount-desc:before{content:"\f161"}.fa-sort-numeric-asc:before{content:"\f162"}.fa-sort-numeric-desc:before{content:"\f163"}.fa-thumbs-up:before{content:"\f164"}.fa-thumbs-down:before{content:"\f165"}.fa-youtube-square:before{content:"\f166"}.fa-youtube:before{content:"\f167"}.fa-xing:before{content:"\f168"}.fa-xing-square:before{content:"\f169"}.fa-youtube-play:before{content:"\f16a"}.fa-dropbox:before{content:"\f16b"}.fa-stack-overflow:before{content:"\f16c"}.fa-instagram:before{content:"\f16d"}.fa-flickr:before{content:"\f16e"}.fa-adn:before{content:"\f170"}.fa-bitbucket:before{content:"\f171"}.fa-bitbucket-square:before{content:"\f172"}.fa-tumblr:before{content:"\f173"}.fa-tumblr-square:before{content:"\f174"}.fa-long-arrow-down:before{content:"\f175"}.fa-long-arrow-up:before{content:"\f176"}.fa-long-arrow-left:before{content:"\f177"}.fa-long-arrow-right:before{content:"\f178"}.fa-apple:before{content:"\f179"}.fa-windows:before{content:"\f17a"}.fa-android:before{content:"\f17b"}.fa-linux:before{content:"\f17c"}.fa-dribbble:before{content:"\f17d"}.fa-skype:before{content:"\f17e"}.fa-foursquare:before{content:"\f180"}.fa-trello:before{content:"\f181"}.fa-female:before{content:"\f182"}.fa-male:before{content:"\f183"}.fa-gittip:before,.fa-gratipay:before{content:"\f184"}.fa-sun-o:before{content:"\f185"}.fa-moon-o:before{content:"\f186"}.fa-archive:before{content:"\f187"}.fa-bug:before{content:"\f188"}.fa-vk:before{content:"\f189"}.fa-weibo:before{content:"\f18a"}.fa-renren:before{content:"\f18b"}.fa-pagelines:before{content:"\f18c"}.fa-stack-exchange:before{content:"\f18d"}.fa-arrow-circle-o-right:before{content:"\f18e"}.fa-arrow-circle-o-left:before{content:"\f190"}.fa-toggle-left:before,.fa-caret-square-o-left:before{content:"\f191"}.fa-dot-circle-o:before{content:"\f192"}.fa-wheelchair:before{content:"\f193"}.fa-vimeo-square:before{content:"\f194"}.fa-turkish-lira:before,.fa-try:before{content:"\f195"}.fa-plus-square-o:before{content:"\f196"}.fa-space-shuttle:before{content:"\f197"}.fa-slack:before{content:"\f198"}.fa-envelope-square:before{content:"\f199"}.fa-wordpress:before{content:"\f19a"}.fa-openid:before{content:"\f19b"}.fa-institution:before,.fa-bank:before,.fa-university:before{content:"\f19c"}.fa-mortar-board:before,.fa-graduation-cap:before{content:"\f19d"}.fa-yahoo:before{content:"\f19e"}.fa-google:before{content:"\f1a0"}.fa-reddit:before{content:"\f1a1"}.fa-reddit-square:before{content:"\f1a2"}.fa-stumbleupon-circle:before{content:"\f1a3"}.fa-stumbleupon:before{content:"\f1a4"}.fa-delicious:before{content:"\f1a5"}.fa-digg:before{content:"\f1a6"}.fa-pied-piper:before{content:"\f1a7"}.fa-pied-piper-alt:before{content:"\f1a8"}.fa-drupal:before{content:"\f1a9"}.fa-joomla:before{content:"\f1aa"}.fa-language:before{content:"\f1ab"}.fa-fax:before{content:"\f1ac"}.fa-building:before{content:"\f1ad"}.fa-child:before{content:"\f1ae"}.fa-paw:before{content:"\f1b0"}.fa-spoon:before{content:"\f1b1"}.fa-cube:before{content:"\f1b2"}.fa-cubes:before{content:"\f1b3"}.fa-behance:before{content:"\f1b4"}.fa-behance-square:before{content:"\f1b5"}.fa-steam:before{content:"\f1b6"}.fa-steam-square:before{content:"\f1b7"}.fa-recycle:before{content:"\f1b8"}.fa-automobile:before,.fa-car:before{content:"\f1b9"}.fa-cab:before,.fa-taxi:before{content:"\f1ba"}.fa-tree:before{content:"\f1bb"}.fa-spotify:before{content:"\f1bc"}.fa-deviantart:before{content:"\f1bd"}.fa-soundcloud:before{content:"\f1be"}.fa-database:before{content:"\f1c0"}.fa-file-pdf-o:before{content:"\f1c1"}.fa-file-word-o:before{content:"\f1c2"}.fa-file-excel-o:before{content:"\f1c3"}.fa-file-powerpoint-o:before{content:"\f1c4"}.fa-file-photo-o:before,.fa-file-picture-o:before,.fa-file-image-o:before{content:"\f1c5"}.fa-file-zip-o:before,.fa-file-archive-o:before{content:"\f1c6"}.fa-file-sound-o:before,.fa-file-audio-o:before{content:"\f1c7"}.fa-file-movie-o:before,.fa-file-video-o:before{content:"\f1c8"}.fa-file-code-o:before{content:"\f1c9"}.fa-vine:before{content:"\f1ca"}.fa-codepen:before{content:"\f1cb"}.fa-jsfiddle:before{content:"\f1cc"}.fa-life-bouy:before,.fa-life-buoy:before,.fa-life-saver:before,.fa-support:before,.fa-life-ring:before{content:"\f1cd"}.fa-circle-o-notch:before{content:"\f1ce"}.fa-ra:before,.fa-rebel:before{content:"\f1d0"}.fa-ge:before,.fa-empire:before{content:"\f1d1"}.fa-git-square:before{content:"\f1d2"}.fa-git:before{content:"\f1d3"}.fa-y-combinator-square:before,.fa-yc-square:before,.fa-hacker-news:before{content:"\f1d4"}.fa-tencent-weibo:before{content:"\f1d5"}.fa-qq:before{content:"\f1d6"}.fa-wechat:before,.fa-weixin:before{content:"\f1d7"}.fa-send:before,.fa-paper-plane:before{content:"\f1d8"}.fa-send-o:before,.fa-paper-plane-o:before{content:"\f1d9"}.fa-history:before{content:"\f1da"}.fa-circle-thin:before{content:"\f1db"}.fa-header:before{content:"\f1dc"}.fa-paragraph:before{content:"\f1dd"}.fa-sliders:before{content:"\f1de"}.fa-share-alt:before{content:"\f1e0"}.fa-share-alt-square:before{content:"\f1e1"}.fa-bomb:before{content:"\f1e2"}.fa-soccer-ball-o:before,.fa-futbol-o:before{content:"\f1e3"}.fa-tty:before{content:"\f1e4"}.fa-binoculars:before{content:"\f1e5"}.fa-plug:before{content:"\f1e6"}.fa-slideshare:before{content:"\f1e7"}.fa-twitch:before{content:"\f1e8"}.fa-yelp:before{content:"\f1e9"}.fa-newspaper-o:before{content:"\f1ea"}.fa-wifi:before{content:"\f1eb"}.fa-calculator:before{content:"\f1ec"}.fa-paypal:before{content:"\f1ed"}.fa-google-wallet:before{content:"\f1ee"}.fa-cc-visa:before{content:"\f1f0"}.fa-cc-mastercard:before{content:"\f1f1"}.fa-cc-discover:before{content:"\f1f2"}.fa-cc-amex:before{content:"\f1f3"}.fa-cc-paypal:before{content:"\f1f4"}.fa-cc-stripe:before{content:"\f1f5"}.fa-bell-slash:before{content:"\f1f6"}.fa-bell-slash-o:before{content:"\f1f7"}.fa-trash:before{content:"\f1f8"}.fa-copyright:before{content:"\f1f9"}.fa-at:before{content:"\f1fa"}.fa-eyedropper:before{content:"\f1fb"}.fa-paint-brush:before{content:"\f1fc"}.fa-birthday-cake:before{content:"\f1fd"}.fa-area-chart:before{content:"\f1fe"}.fa-pie-chart:before{content:"\f200"}.fa-line-chart:before{content:"\f201"}.fa-lastfm:before{content:"\f202"}.fa-lastfm-square:before{content:"\f203"}.fa-toggle-off:before{content:"\f204"}.fa-toggle-on:before{content:"\f205"}.fa-bicycle:before{content:"\f206"}.fa-bus:before{content:"\f207"}.fa-ioxhost:before{content:"\f208"}.fa-angellist:before{content:"\f209"}.fa-cc:before{content:"\f20a"}.fa-shekel:before,.fa-sheqel:before,.fa-ils:before{content:"\f20b"}.fa-meanpath:before{content:"\f20c"}.fa-buysellads:before{content:"\f20d"}.fa-connectdevelop:before{content:"\f20e"}.fa-dashcube:before{content:"\f210"}.fa-forumbee:before{content:"\f211"}.fa-leanpub:before{content:"\f212"}.fa-sellsy:before{content:"\f213"}.fa-shirtsinbulk:before{content:"\f214"}.fa-simplybuilt:before{content:"\f215"}.fa-skyatlas:before{content:"\f216"}.fa-cart-plus:before{content:"\f217"}.fa-cart-arrow-down:before{content:"\f218"}.fa-diamond:before{content:"\f219"}.fa-ship:before{content:"\f21a"}.fa-user-secret:before{content:"\f21b"}.fa-motorcycle:before{content:"\f21c"}.fa-street-view:before{content:"\f21d"}.fa-heartbeat:before{content:"\f21e"}.fa-venus:before{content:"\f221"}.fa-mars:before{content:"\f222"}.fa-mercury:before{content:"\f223"}.fa-intersex:before,.fa-transgender:before{content:"\f224"}.fa-transgender-alt:before{content:"\f225"}.fa-venus-double:before{content:"\f226"}.fa-mars-double:before{content:"\f227"}.fa-venus-mars:before{content:"\f228"}.fa-mars-stroke:before{content:"\f229"}.fa-mars-stroke-v:before{content:"\f22a"}.fa-mars-stroke-h:before{content:"\f22b"}.fa-neuter:before{content:"\f22c"}.fa-genderless:before{content:"\f22d"}.fa-facebook-official:before{content:"\f230"}.fa-pinterest-p:before{content:"\f231"}.fa-whatsapp:before{content:"\f232"}.fa-server:before{content:"\f233"}.fa-user-plus:before{content:"\f234"}.fa-user-times:before{content:"\f235"}.fa-hotel:before,.fa-bed:before{content:"\f236"}.fa-viacoin:before{content:"\f237"}.fa-train:before{content:"\f238"}.fa-subway:before{content:"\f239"}.fa-medium:before{content:"\f23a"}.fa-yc:before,.fa-y-combinator:before{content:"\f23b"}.fa-optin-monster:before{content:"\f23c"}.fa-opencart:before{content:"\f23d"}.fa-expeditedssl:before{content:"\f23e"}.fa-battery-4:before,.fa-battery-full:before{content:"\f240"}.fa-battery-3:before,.fa-battery-three-quarters:before{content:"\f241"}.fa-battery-2:before,.fa-battery-half:before{content:"\f242"}.fa-battery-1:before,.fa-battery-quarter:before{content:"\f243"}.fa-battery-0:before,.fa-battery-empty:before{content:"\f244"}.fa-mouse-pointer:before{content:"\f245"}.fa-i-cursor:before{content:"\f246"}.fa-object-group:before{content:"\f247"}.fa-object-ungroup:before{content:"\f248"}.fa-sticky-note:before{content:"\f249"}.fa-sticky-note-o:before{content:"\f24a"}.fa-cc-jcb:before{content:"\f24b"}.fa-cc-diners-club:before{content:"\f24c"}.fa-clone:before{content:"\f24d"}.fa-balance-scale:before{content:"\f24e"}.fa-hourglass-o:before{content:"\f250"}.fa-hourglass-1:before,.fa-hourglass-start:before{content:"\f251"}.fa-hourglass-2:before,.fa-hourglass-half:before{content:"\f252"}.fa-hourglass-3:before,.fa-hourglass-end:before{content:"\f253"}.fa-hourglass:before{content:"\f254"}.fa-hand-grab-o:before,.fa-hand-rock-o:before{content:"\f255"}.fa-hand-stop-o:before,.fa-hand-paper-o:before{content:"\f256"}.fa-hand-scissors-o:before{content:"\f257"}.fa-hand-lizard-o:before{content:"\f258"}.fa-hand-spock-o:before{content:"\f259"}.fa-hand-pointer-o:before{content:"\f25a"}.fa-hand-peace-o:before{content:"\f25b"}.fa-trademark:before{content:"\f25c"}.fa-registered:before{content:"\f25d"}.fa-creative-commons:before{content:"\f25e"}.fa-gg:before{content:"\f260"}.fa-gg-circle:before{content:"\f261"}.fa-tripadvisor:before{content:"\f262"}.fa-odnoklassniki:before{content:"\f263"}.fa-odnoklassniki-square:before{content:"\f264"}.fa-get-pocket:before{content:"\f265"}.fa-wikipedia-w:before{content:"\f266"}.fa-safari:before{content:"\f267"}.fa-chrome:before{content:"\f268"}.fa-firefox:before{content:"\f269"}.fa-opera:before{content:"\f26a"}.fa-internet-explorer:before{content:"\f26b"}.fa-tv:before,.fa-television:before{content:"\f26c"}.fa-contao:before{content:"\f26d"}.fa-500px:before{content:"\f26e"}.fa-amazon:before{content:"\f270"}.fa-calendar-plus-o:before{content:"\f271"}.fa-calendar-minus-o:before{content:"\f272"}.fa-calendar-times-o:before{content:"\f273"}.fa-calendar-check-o:before{content:"\f274"}.fa-industry:before{content:"\f275"}.fa-map-pin:before{content:"\f276"}.fa-map-signs:before{content:"\f277"}.fa-map-o:before{content:"\f278"}.fa-map:before{content:"\f279"}.fa-commenting:before{content:"\f27a"}.fa-commenting-o:before{content:"\f27b"}.fa-houzz:before{content:"\f27c"}.fa-vimeo:before{content:"\f27d"}.fa-black-tie:before{content:"\f27e"}.fa-fonticons:before{content:"\f280"}.fa-reddit-alien:before{content:"\f281"}.fa-edge:before{content:"\f282"}.fa-credit-card-alt:before{content:"\f283"}.fa-codiepie:before{content:"\f284"}.fa-modx:before{content:"\f285"}.fa-fort-awesome:before{content:"\f286"}.fa-usb:before{content:"\f287"}.fa-product-hunt:before{content:"\f288"}.fa-mixcloud:before{content:"\f289"}.fa-scribd:before{content:"\f28a"}.fa-pause-circle:before{content:"\f28b"}.fa-pause-circle-o:before{content:"\f28c"}.fa-stop-circle:before{content:"\f28d"}.fa-stop-circle-o:before{content:"\f28e"}.fa-shopping-bag:before{content:"\f290"}.fa-shopping-basket:before{content:"\f291"}.fa-hashtag:before{content:"\f292"}.fa-bluetooth:before{content:"\f293"}.fa-bluetooth-b:before{content:"\f294"}.fa-percent:before{content:"\f295"}
+
+</style>
+
 <dom-module id="vaadin-license-checker" assetpath="../bower_components/vaadin-license-checker/">
 
     <template>
@@ -20514,7 +20775,12 @@ context. You should place this element as a child of `<body>` whenever possible.
         /**
          * Elements that contain an array of values, either as a comma-separated list or multiple elements
          **/
-        _arrayNodes: ["categories", "stops", "margin", "center", "units"],
+        _arrayNodes: ["categories", "margin", "center", "units"],
+
+        /**
+         * Elements that contain two dimensional arrays. The values in value array can be specified using attributes and parser knows the correct order.
+         **/
+        _twoDimArrayNodes: {"stops": ["position", "color"] },
 
         /**
          * Elements whose text content should be set as text property value
@@ -20530,8 +20796,13 @@ context. You should place this element as a child of `<body>` whenever possible.
          *  Name of the elements of the light DOM that need to be mapped when creating the JSON configuration
          **/
         _mappedKeywords: {
-            "area-chart": "area",
-            frame3d: "frame"
+            "chart-area": "area",
+            "stroke-width": "stroke-width",
+            "chart-frame": "frame",
+            "chart-style": "style",
+            "chart-title": "title",
+            "draw-on-series": "onSeries",
+            "draw-on-key": "onKey"
         },
 
         /**
@@ -20635,20 +20906,18 @@ context. You should place this element as a child of `<body>` whenever possible.
             return node.hasChildNodes() && node.childNodes.length == 1 && node.childNodes[0].nodeType == 3 && node.textContent.trim() != "";
         },
 
+
         /**
          * Returns a boolean value if text content is 'true' or 'false'. Otherwise, the return value is the text content itself.
          *
          * @param {node} the node to parse the text content
          **/
         _parseTextContent: function (node) {
-            var content = node.textContent;
-            if ("true" == content) {
-                return true;
+            try {
+              return JSON.parse(node.textContent);
+            } catch (e) {
+               return node.textContent;
             }
-            if ("false" == content) {
-                return false;
-            }
-            return content;
         },
 
         /**
@@ -20679,13 +20948,36 @@ context. You should place this element as a child of `<body>` whenever possible.
                             }
                         }
                         result = result.length > 1 ? result : result[0];
-
+                    } else if (this._twoDimArrayNodes.hasOwnProperty(name)) {
+                        result = [];
+                        if (this._hasOnlyTextContent(node)) {
+                            node.textContent.split(/\s*,\s*/).forEach(function (word) {
+                                result.push(this._parseAttribute(word));
+                            }, this);
+                        } else {
+                            var values = this._twoDimArrayNodes[name];
+                            for (var i = 0; i < values.length; ++i) {
+                                var name = values[i];
+                                var attr = this._parseAttribute(node.getAttribute(name));
+                                if(attr != null) {
+                                    result.push(attr);
+                                } else {
+                                    for (var j = 0; j < node.childNodes.length; j++) {
+                                        var child = node.childNodes[j];
+                                        if (name === child.nodeName.toLowerCase()) {
+                                            result.push(this._parseAttribute(child.textContent));
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     } else if (this._nodeValueAttributes.indexOf(name) !== -1) {
                         result = node;
                     } else if (this._multivaluedNodes.indexOf(camelName) !== -1 || dest[camelName] === undefined) {
                         if (this._textContentNodes.indexOf(camelName) === -1 && this._hasOnlyTextContent(node)) {
                             result = this._parseTextContent(node);
-                        } else {
+                        }
+                        else {
                             result = {};
                             this._loadFromNode(result, node);
                             this._loadConfiguration(result, node);
@@ -22798,160 +23090,586 @@ k.prototype.hasReader=function(b){var a,e;for(a=0;a<this.readers.length;a+=1)if(
 <g id="youtube"><path d="M26.4 0h-3.6l-2.4 9.2-2.4-9.2h-4c0.8 2.4 1.6 4.4 2.4 6.8 1.2 3.2 2 6 2 7.6v9.6h3.6v-9.6l4.4-14.4zM36 18v-6c0-2-0.4-3.2-1.2-4.4s-2-1.6-3.6-1.6c-1.6 0-2.8 0.8-3.6 2-0.8 0.8-1.2 2-1.2 4v6.4c0 2 0.4 3.2 1.2 4 0.8 1.2 2 1.6 3.6 1.6s2.8-0.8 3.6-2c0.8-0.4 1.2-2 1.2-4zM32.8 18.8c0 1.6-0.4 2.4-1.6 2.4s-1.6-0.8-1.6-2.4v-7.6c0-1.6 0.4-2.4 1.6-2.4s1.6 0.8 1.6 2.4v7.6zM48 24v-18h-3.2v13.6c-0.8 1.2-1.2 1.6-2 1.6-0.4 0-0.8-0.4-0.8-0.8 0 0 0-0.4 0-1.2v-13.2h-3.2v14c0 1.2 0 2 0.4 2.8 0 0.8 0.8 1.2 2 1.2s2.4-0.8 3.6-2v2h3.2z"></path><path d="M49.6 42c-1.2 0-1.6 0.8-1.6 2.4v1.6h3.2v-1.6c0-1.6-0.4-2.4-1.6-2.4z"></path><path d="M38 42c-0.4 0-1.2 0.4-1.6 0.8v10.8c0.4 0.4 1.2 0.8 1.6 0.8 0.8 0 1.2-0.8 1.2-2.4v-7.6c0-1.6-0.4-2.4-1.2-2.4z"></path><path d="M57.6 33.2c-0.8-2.8-3.2-5.2-5.6-5.2-6.4-0.8-13.2-0.8-20-0.8s-13.2 0-20 0.8c-2.4 0-4.8 2.4-5.6 5.2-0.8 4-0.8 8.4-0.8 12.4s0 8.4 0.8 12.4c0.8 2.8 2.8 4.8 5.6 5.2 6.8 0.8 13.2 0.8 20 0.8s13.2 0 20-0.8c2.8-0.4 5.2-2.4 5.6-5.2 0.8-4 0.8-8.4 0.8-12.4s0-8.4-0.8-12.4zM20.8 36.8h-4v20.4h-3.6v-20.4h-3.6v-3.6h11.2v3.6zM30.4 57.2h-3.2v-2c-1.2 1.6-2.4 2-3.6 2s-1.6-0.4-2-1.2c0-0.4-0.4-1.2-0.4-2.8v-14h3.2v12.8c0 0.8 0 1.2 0 1.2 0 0.4 0.4 0.8 0.8 0.8 0.8 0 1.2-0.4 2-1.6v-13.2h3.2v18zM42.4 51.6c0 1.6 0 2.8-0.4 3.6-0.4 1.2-1.2 2-2.4 2s-2.4-0.8-3.2-2v1.6h-3.2v-23.6h3.2v7.6c1.2-1.2 2-2 3.2-2s2 0.8 2.4 2c0.4 0.8 0.4 2 0.4 3.6v7.2zM54.4 48.8h-6.4v3.2c0 1.6 0.4 2.4 1.6 2.4 0.8 0 1.2-0.4 1.6-1.2 0 0 0-0.8 0-2h3.2v0.4c0 1.2 0 1.6 0 2 0 0.8-0.4 1.2-0.8 2-0.8 1.2-2 2-4 2-1.6 0-2.8-0.8-4-2-0.8-0.8-1.2-2.4-1.2-4v-6c0-2 0.4-3.2 0.8-4 0.8-1.2 2-2 4-2 1.6 0 2.8 0.8 3.6 2 0.8 0.8 0.8 2.4 0.8 4v3.2z"></path></g>
 </defs></svg>
 </iron-iconset-svg>
-<script type="text/javascript">/**
- * @version: 1.0 Alpha-1
- * @author: Coolite Inc. http://www.coolite.com/
- * @date: 2008-05-13
- * @copyright: Copyright (c) 2006-2008, Coolite Inc. (http://www.coolite.com/). All rights reserved.
- * @license: Licensed under The MIT License. See license.txt and http://www.datejs.com/license/. 
- * @website: http://www.datejs.com/
- */
-Date.CultureInfo={name:"fi-FI",englishName:"Finnish (Finland)",nativeName:"suomi (Suomi)",dayNames:["sunnuntai","maanantai","tiistai","keskiviikko","torstai","perjantai","lauantai"],abbreviatedDayNames:["su","ma","ti","ke","to","pe","la"],shortestDayNames:["su","ma","ti","ke","to","pe","la"],firstLetterDayNames:["s","m","t","k","t","p","l"],monthNames:["tammikuu","helmikuu","maaliskuu","huhtikuu","toukokuu","kesäkuu","heinäkuu","elokuu","syyskuu","lokakuu","marraskuu","joulukuu"],abbreviatedMonthNames:["tammi","helmi","maalis","huhti","touko","kesä","heinä","elo","syys","loka","marras","joulu"],amDesignator:"",pmDesignator:"",firstDayOfWeek:1,twoDigitYearMax:2029,dateElementOrder:"dmy",formatPatterns:{shortDate:"d.M.yyyy",longDate:"d. MMMM'ta 'yyyy",shortTime:"H:mm",longTime:"H:mm:ss",fullDateTime:"d. MMMM'ta 'yyyy H:mm:ss",sortableDateTime:"yyyy-MM-ddTHH:mm:ss",universalSortableDateTime:"yyyy-MM-dd HH:mm:ssZ",rfc1123:"ddd, dd MMM yyyy HH:mm:ss GMT",monthDay:"d. MMMM'ta'",yearMonth:"MMMM yyyy"},regexPatterns:{jan:/^tammi(kuu)?/i,feb:/^helmi(kuu)?/i,mar:/^maalis(kuu)?/i,apr:/^huhti(kuu)?/i,may:/^touko(kuu)?/i,jun:/^kesä(kuu)?/i,jul:/^heinä(kuu)?/i,aug:/^elo(kuu)?/i,sep:/^syys(kuu)?/i,oct:/^loka(kuu)?/i,nov:/^marras(kuu)?/i,dec:/^joulu(kuu)?/i,sun:/^sunnuntai/i,mon:/^maanantai/i,tue:/^tiistai/i,wed:/^keskiviikko/i,thu:/^torstai/i,fri:/^perjantai/i,sat:/^lauantai/i,future:/^next/i,past:/^last|past|prev(ious)?/i,add:/^(\+|aft(er)?|from|hence)/i,subtract:/^(\-|bef(ore)?|ago)/i,yesterday:/^yes(terday)?/i,today:/^t(od(ay)?)?/i,tomorrow:/^tom(orrow)?/i,now:/^n(ow)?/i,millisecond:/^ms|milli(second)?s?/i,second:/^sec(ond)?s?/i,minute:/^mn|min(ute)?s?/i,hour:/^h(our)?s?/i,week:/^w(eek)?s?/i,month:/^m(onth)?s?/i,day:/^d(ay)?s?/i,year:/^y(ear)?s?/i,shortMeridian:/^(a|p)/i,longMeridian:/^(a\.?m?\.?|p\.?m?\.?)/i,timezone:/^((e(s|d)t|c(s|d)t|m(s|d)t|p(s|d)t)|((gmt)?\s*(\+|\-)\s*\d\d\d\d?)|gmt|utc)/i,ordinalSuffix:/^\s*(st|nd|rd|th)/i,timeContext:/^\s*(\:|a(?!u|p)|p)/i},timezones:[{name:"UTC",offset:"-000"},{name:"GMT",offset:"-000"},{name:"EST",offset:"-0500"},{name:"EDT",offset:"-0400"},{name:"CST",offset:"-0600"},{name:"CDT",offset:"-0500"},{name:"MST",offset:"-0700"},{name:"MDT",offset:"-0600"},{name:"PST",offset:"-0800"},{name:"PDT",offset:"-0700"}]};
-(function(){var $D=Date,$P=$D.prototype,$C=$D.CultureInfo,p=function(s,l){if(!l){l=2;}
-return("000"+s).slice(l*-1);};$P.clearTime=function(){this.setHours(0);this.setMinutes(0);this.setSeconds(0);this.setMilliseconds(0);return this;};$P.setTimeToNow=function(){var n=new Date();this.setHours(n.getHours());this.setMinutes(n.getMinutes());this.setSeconds(n.getSeconds());this.setMilliseconds(n.getMilliseconds());return this;};$D.today=function(){return new Date().clearTime();};$D.compare=function(date1,date2){if(isNaN(date1)||isNaN(date2)){throw new Error(date1+" - "+date2);}else if(date1 instanceof Date&&date2 instanceof Date){return(date1<date2)?-1:(date1>date2)?1:0;}else{throw new TypeError(date1+" - "+date2);}};$D.equals=function(date1,date2){return(date1.compareTo(date2)===0);};$D.getDayNumberFromName=function(name){var n=$C.dayNames,m=$C.abbreviatedDayNames,o=$C.shortestDayNames,s=name.toLowerCase();for(var i=0;i<n.length;i++){if(n[i].toLowerCase()==s||m[i].toLowerCase()==s||o[i].toLowerCase()==s){return i;}}
-return-1;};$D.getMonthNumberFromName=function(name){var n=$C.monthNames,m=$C.abbreviatedMonthNames,s=name.toLowerCase();for(var i=0;i<n.length;i++){if(n[i].toLowerCase()==s||m[i].toLowerCase()==s){return i;}}
-return-1;};$D.isLeapYear=function(year){return((year%4===0&&year%100!==0)||year%400===0);};$D.getDaysInMonth=function(year,month){return[31,($D.isLeapYear(year)?29:28),31,30,31,30,31,31,30,31,30,31][month];};$D.getTimezoneAbbreviation=function(offset){var z=$C.timezones,p;for(var i=0;i<z.length;i++){if(z[i].offset===offset){return z[i].name;}}
-return null;};$D.getTimezoneOffset=function(name){var z=$C.timezones,p;for(var i=0;i<z.length;i++){if(z[i].name===name.toUpperCase()){return z[i].offset;}}
-return null;};$P.clone=function(){return new Date(this.getTime());};$P.compareTo=function(date){return Date.compare(this,date);};$P.equals=function(date){return Date.equals(this,date||new Date());};$P.between=function(start,end){return this.getTime()>=start.getTime()&&this.getTime()<=end.getTime();};$P.isAfter=function(date){return this.compareTo(date||new Date())===1;};$P.isBefore=function(date){return(this.compareTo(date||new Date())===-1);};$P.isToday=function(){return this.isSameDay(new Date());};$P.isSameDay=function(date){return this.clone().clearTime().equals(date.clone().clearTime());};$P.addMilliseconds=function(value){this.setMilliseconds(this.getMilliseconds()+value);return this;};$P.addSeconds=function(value){return this.addMilliseconds(value*1000);};$P.addMinutes=function(value){return this.addMilliseconds(value*60000);};$P.addHours=function(value){return this.addMilliseconds(value*3600000);};$P.addDays=function(value){this.setDate(this.getDate()+value);return this;};$P.addWeeks=function(value){return this.addDays(value*7);};$P.addMonths=function(value){var n=this.getDate();this.setDate(1);this.setMonth(this.getMonth()+value);this.setDate(Math.min(n,$D.getDaysInMonth(this.getFullYear(),this.getMonth())));return this;};$P.addYears=function(value){return this.addMonths(value*12);};$P.add=function(config){if(typeof config=="number"){this._orient=config;return this;}
-var x=config;if(x.milliseconds){this.addMilliseconds(x.milliseconds);}
-if(x.seconds){this.addSeconds(x.seconds);}
-if(x.minutes){this.addMinutes(x.minutes);}
-if(x.hours){this.addHours(x.hours);}
-if(x.weeks){this.addWeeks(x.weeks);}
-if(x.months){this.addMonths(x.months);}
-if(x.years){this.addYears(x.years);}
-if(x.days){this.addDays(x.days);}
-return this;};var $y,$m,$d;$P.getWeek=function(){var a,b,c,d,e,f,g,n,s,w;$y=(!$y)?this.getFullYear():$y;$m=(!$m)?this.getMonth()+1:$m;$d=(!$d)?this.getDate():$d;if($m<=2){a=$y-1;b=(a/4|0)-(a/100|0)+(a/400|0);c=((a-1)/4|0)-((a-1)/100|0)+((a-1)/400|0);s=b-c;e=0;f=$d-1+(31*($m-1));}else{a=$y;b=(a/4|0)-(a/100|0)+(a/400|0);c=((a-1)/4|0)-((a-1)/100|0)+((a-1)/400|0);s=b-c;e=s+1;f=$d+((153*($m-3)+2)/5)+58+s;}
-g=(a+b)%7;d=(f+g-e)%7;n=(f+3-d)|0;if(n<0){w=53-((g-s)/5|0);}else if(n>364+s){w=1;}else{w=(n/7|0)+1;}
-$y=$m=$d=null;return w;};$P.getISOWeek=function(){$y=this.getUTCFullYear();$m=this.getUTCMonth()+1;$d=this.getUTCDate();return p(this.getWeek());};$P.setWeek=function(n){return this.moveToDayOfWeek(1).addWeeks(n-this.getWeek());};$D._validate=function(n,min,max,name){if(typeof n=="undefined"){return false;}else if(typeof n!="number"){throw new TypeError(n+" is not a Number.");}else if(n<min||n>max){throw new RangeError(n+" is not a valid value for "+name+".");}
-return true;};$D.validateMillisecond=function(value){return $D._validate(value,0,999,"millisecond");};$D.validateSecond=function(value){return $D._validate(value,0,59,"second");};$D.validateMinute=function(value){return $D._validate(value,0,59,"minute");};$D.validateHour=function(value){return $D._validate(value,0,23,"hour");};$D.validateDay=function(value,year,month){return $D._validate(value,1,$D.getDaysInMonth(year,month),"day");};$D.validateMonth=function(value){return $D._validate(value,0,11,"month");};$D.validateYear=function(value){return $D._validate(value,0,9999,"year");};$P.set=function(config){if($D.validateMillisecond(config.millisecond)){this.addMilliseconds(config.millisecond-this.getMilliseconds());}
-if($D.validateSecond(config.second)){this.addSeconds(config.second-this.getSeconds());}
-if($D.validateMinute(config.minute)){this.addMinutes(config.minute-this.getMinutes());}
-if($D.validateHour(config.hour)){this.addHours(config.hour-this.getHours());}
-if($D.validateMonth(config.month)){this.addMonths(config.month-this.getMonth());}
-if($D.validateYear(config.year)){this.addYears(config.year-this.getFullYear());}
-if($D.validateDay(config.day,this.getFullYear(),this.getMonth())){this.addDays(config.day-this.getDate());}
-if(config.timezone){this.setTimezone(config.timezone);}
-if(config.timezoneOffset){this.setTimezoneOffset(config.timezoneOffset);}
-if(config.week&&$D._validate(config.week,0,53,"week")){this.setWeek(config.week);}
-return this;};$P.moveToFirstDayOfMonth=function(){return this.set({day:1});};$P.moveToLastDayOfMonth=function(){return this.set({day:$D.getDaysInMonth(this.getFullYear(),this.getMonth())});};$P.moveToNthOccurrence=function(dayOfWeek,occurrence){var shift=0;if(occurrence>0){shift=occurrence-1;}
-else if(occurrence===-1){this.moveToLastDayOfMonth();if(this.getDay()!==dayOfWeek){this.moveToDayOfWeek(dayOfWeek,-1);}
-return this;}
-return this.moveToFirstDayOfMonth().addDays(-1).moveToDayOfWeek(dayOfWeek,+1).addWeeks(shift);};$P.moveToDayOfWeek=function(dayOfWeek,orient){var diff=(dayOfWeek-this.getDay()+7*(orient||+1))%7;return this.addDays((diff===0)?diff+=7*(orient||+1):diff);};$P.moveToMonth=function(month,orient){var diff=(month-this.getMonth()+12*(orient||+1))%12;return this.addMonths((diff===0)?diff+=12*(orient||+1):diff);};$P.getOrdinalNumber=function(){return Math.ceil((this.clone().clearTime()-new Date(this.getFullYear(),0,1))/86400000)+1;};$P.getTimezone=function(){return $D.getTimezoneAbbreviation(this.getUTCOffset());};$P.setTimezoneOffset=function(offset){var here=this.getTimezoneOffset(),there=Number(offset)*-6/10;return this.addMinutes(there-here);};$P.setTimezone=function(offset){return this.setTimezoneOffset($D.getTimezoneOffset(offset));};$P.hasDaylightSavingTime=function(){return(Date.today().set({month:0,day:1}).getTimezoneOffset()!==Date.today().set({month:6,day:1}).getTimezoneOffset());};$P.isDaylightSavingTime=function(){return(this.hasDaylightSavingTime()&&new Date().getTimezoneOffset()===Date.today().set({month:6,day:1}).getTimezoneOffset());};$P.getUTCOffset=function(){var n=this.getTimezoneOffset()*-10/6,r;if(n<0){r=(n-10000).toString();return r.charAt(0)+r.substr(2);}else{r=(n+10000).toString();return"+"+r.substr(1);}};$P.getElapsed=function(date){return(date||new Date())-this;};if(!$P.toISOString){$P.toISOString=function(){function f(n){return n<10?'0'+n:n;}
-return'"'+this.getUTCFullYear()+'-'+
-f(this.getUTCMonth()+1)+'-'+
-f(this.getUTCDate())+'T'+
-f(this.getUTCHours())+':'+
-f(this.getUTCMinutes())+':'+
-f(this.getUTCSeconds())+'Z"';};}
-$P._toString=$P.toString;$P.toString=function(format){var x=this;if(format&&format.length==1){var c=$C.formatPatterns;x.t=x.toString;switch(format){case"d":return x.t(c.shortDate);case"D":return x.t(c.longDate);case"F":return x.t(c.fullDateTime);case"m":return x.t(c.monthDay);case"r":return x.t(c.rfc1123);case"s":return x.t(c.sortableDateTime);case"t":return x.t(c.shortTime);case"T":return x.t(c.longTime);case"u":return x.t(c.universalSortableDateTime);case"y":return x.t(c.yearMonth);}}
-var ord=function(n){switch(n*1){case 1:case 21:case 31:return"st";case 2:case 22:return"nd";case 3:case 23:return"rd";default:return"th";}};return format?format.replace(/(\\)?(dd?d?d?|MM?M?M?|yy?y?y?|hh?|HH?|mm?|ss?|tt?|S)/g,function(m){if(m.charAt(0)==="\\"){return m.replace("\\","");}
-x.h=x.getHours;switch(m){case"hh":return p(x.h()<13?(x.h()===0?12:x.h()):(x.h()-12));case"h":return x.h()<13?(x.h()===0?12:x.h()):(x.h()-12);case"HH":return p(x.h());case"H":return x.h();case"mm":return p(x.getMinutes());case"m":return x.getMinutes();case"ss":return p(x.getSeconds());case"s":return x.getSeconds();case"yyyy":return p(x.getFullYear(),4);case"yy":return p(x.getFullYear());case"dddd":return $C.dayNames[x.getDay()];case"ddd":return $C.abbreviatedDayNames[x.getDay()];case"dd":return p(x.getDate());case"d":return x.getDate();case"MMMM":return $C.monthNames[x.getMonth()];case"MMM":return $C.abbreviatedMonthNames[x.getMonth()];case"MM":return p((x.getMonth()+1));case"M":return x.getMonth()+1;case"t":return x.h()<12?$C.amDesignator.substring(0,1):$C.pmDesignator.substring(0,1);case"tt":return x.h()<12?$C.amDesignator:$C.pmDesignator;case"S":return ord(x.getDate());default:return m;}}):this._toString();};}());
-(function(){var $D=Date,$P=$D.prototype,$C=$D.CultureInfo,$N=Number.prototype;$P._orient=+1;$P._nth=null;$P._is=false;$P._same=false;$P._isSecond=false;$N._dateElement="day";$P.next=function(){this._orient=+1;return this;};$D.next=function(){return $D.today().next();};$P.last=$P.prev=$P.previous=function(){this._orient=-1;return this;};$D.last=$D.prev=$D.previous=function(){return $D.today().last();};$P.is=function(){this._is=true;return this;};$P.same=function(){this._same=true;this._isSecond=false;return this;};$P.today=function(){return this.same().day();};$P.weekday=function(){if(this._is){this._is=false;return(!this.is().sat()&&!this.is().sun());}
-return false;};$P.at=function(time){return(typeof time==="string")?$D.parse(this.toString("d")+" "+time):this.set(time);};$N.fromNow=$N.after=function(date){var c={};c[this._dateElement]=this;return((!date)?new Date():date.clone()).add(c);};$N.ago=$N.before=function(date){var c={};c[this._dateElement]=this*-1;return((!date)?new Date():date.clone()).add(c);};var dx=("sunday monday tuesday wednesday thursday friday saturday").split(/\s/),mx=("january february march april may june july august september october november december").split(/\s/),px=("Millisecond Second Minute Hour Day Week Month Year").split(/\s/),pxf=("Milliseconds Seconds Minutes Hours Date Week Month FullYear").split(/\s/),nth=("final first second third fourth fifth").split(/\s/),de;$P.toObject=function(){var o={};for(var i=0;i<px.length;i++){o[px[i].toLowerCase()]=this["get"+pxf[i]]();}
-return o;};$D.fromObject=function(config){config.week=null;return Date.today().set(config);};var df=function(n){return function(){if(this._is){this._is=false;return this.getDay()==n;}
-if(this._nth!==null){if(this._isSecond){this.addSeconds(this._orient*-1);}
-this._isSecond=false;var ntemp=this._nth;this._nth=null;var temp=this.clone().moveToLastDayOfMonth();this.moveToNthOccurrence(n,ntemp);if(this>temp){throw new RangeError($D.getDayName(n)+" does not occur "+ntemp+" times in the month of "+$D.getMonthName(temp.getMonth())+" "+temp.getFullYear()+".");}
-return this;}
-return this.moveToDayOfWeek(n,this._orient);};};var sdf=function(n){return function(){var t=$D.today(),shift=n-t.getDay();if(n===0&&$C.firstDayOfWeek===1&&t.getDay()!==0){shift=shift+7;}
-return t.addDays(shift);};};for(var i=0;i<dx.length;i++){$D[dx[i].toUpperCase()]=$D[dx[i].toUpperCase().substring(0,3)]=i;$D[dx[i]]=$D[dx[i].substring(0,3)]=sdf(i);$P[dx[i]]=$P[dx[i].substring(0,3)]=df(i);}
-var mf=function(n){return function(){if(this._is){this._is=false;return this.getMonth()===n;}
-return this.moveToMonth(n,this._orient);};};var smf=function(n){return function(){return $D.today().set({month:n,day:1});};};for(var j=0;j<mx.length;j++){$D[mx[j].toUpperCase()]=$D[mx[j].toUpperCase().substring(0,3)]=j;$D[mx[j]]=$D[mx[j].substring(0,3)]=smf(j);$P[mx[j]]=$P[mx[j].substring(0,3)]=mf(j);}
-var ef=function(j){return function(){if(this._isSecond){this._isSecond=false;return this;}
-if(this._same){this._same=this._is=false;var o1=this.toObject(),o2=(arguments[0]||new Date()).toObject(),v="",k=j.toLowerCase();for(var m=(px.length-1);m>-1;m--){v=px[m].toLowerCase();if(o1[v]!=o2[v]){return false;}
-if(k==v){break;}}
-return true;}
-if(j.substring(j.length-1)!="s"){j+="s";}
-return this["add"+j](this._orient);};};var nf=function(n){return function(){this._dateElement=n;return this;};};for(var k=0;k<px.length;k++){de=px[k].toLowerCase();$P[de]=$P[de+"s"]=ef(px[k]);$N[de]=$N[de+"s"]=nf(de);}
-$P._ss=ef("Second");var nthfn=function(n){return function(dayOfWeek){if(this._same){return this._ss(arguments[0]);}
-if(dayOfWeek||dayOfWeek===0){return this.moveToNthOccurrence(dayOfWeek,n);}
-this._nth=n;if(n===2&&(dayOfWeek===undefined||dayOfWeek===null)){this._isSecond=true;return this.addSeconds(this._orient);}
-return this;};};for(var l=0;l<nth.length;l++){$P[nth[l]]=(l===0)?nthfn(-1):nthfn(l);}}());
-(function(){Date.Parsing={Exception:function(s){this.message="Parse error at '"+s.substring(0,10)+" ...'";}};var $P=Date.Parsing;var _=$P.Operators={rtoken:function(r){return function(s){var mx=s.match(r);if(mx){return([mx[0],s.substring(mx[0].length)]);}else{throw new $P.Exception(s);}};},token:function(s){return function(s){return _.rtoken(new RegExp("^\s*"+s+"\s*"))(s);};},stoken:function(s){return _.rtoken(new RegExp("^"+s));},until:function(p){return function(s){var qx=[],rx=null;while(s.length){try{rx=p.call(this,s);}catch(e){qx.push(rx[0]);s=rx[1];continue;}
-break;}
-return[qx,s];};},many:function(p){return function(s){var rx=[],r=null;while(s.length){try{r=p.call(this,s);}catch(e){return[rx,s];}
-rx.push(r[0]);s=r[1];}
-return[rx,s];};},optional:function(p){return function(s){var r=null;try{r=p.call(this,s);}catch(e){return[null,s];}
-return[r[0],r[1]];};},not:function(p){return function(s){try{p.call(this,s);}catch(e){return[null,s];}
-throw new $P.Exception(s);};},ignore:function(p){return p?function(s){var r=null;r=p.call(this,s);return[null,r[1]];}:null;},product:function(){var px=arguments[0],qx=Array.prototype.slice.call(arguments,1),rx=[];for(var i=0;i<px.length;i++){rx.push(_.each(px[i],qx));}
-return rx;},cache:function(rule){var cache={},r=null;return function(s){try{r=cache[s]=(cache[s]||rule.call(this,s));}catch(e){r=cache[s]=e;}
-if(r instanceof $P.Exception){throw r;}else{return r;}};},any:function(){var px=arguments;return function(s){var r=null;for(var i=0;i<px.length;i++){if(px[i]==null){continue;}
-try{r=(px[i].call(this,s));}catch(e){r=null;}
-if(r){return r;}}
-throw new $P.Exception(s);};},each:function(){var px=arguments;return function(s){var rx=[],r=null;for(var i=0;i<px.length;i++){if(px[i]==null){continue;}
-try{r=(px[i].call(this,s));}catch(e){throw new $P.Exception(s);}
-rx.push(r[0]);s=r[1];}
-return[rx,s];};},all:function(){var px=arguments,_=_;return _.each(_.optional(px));},sequence:function(px,d,c){d=d||_.rtoken(/^\s*/);c=c||null;if(px.length==1){return px[0];}
-return function(s){var r=null,q=null;var rx=[];for(var i=0;i<px.length;i++){try{r=px[i].call(this,s);}catch(e){break;}
-rx.push(r[0]);try{q=d.call(this,r[1]);}catch(ex){q=null;break;}
-s=q[1];}
-if(!r){throw new $P.Exception(s);}
-if(q){throw new $P.Exception(q[1]);}
-if(c){try{r=c.call(this,r[1]);}catch(ey){throw new $P.Exception(r[1]);}}
-return[rx,(r?r[1]:s)];};},between:function(d1,p,d2){d2=d2||d1;var _fn=_.each(_.ignore(d1),p,_.ignore(d2));return function(s){var rx=_fn.call(this,s);return[[rx[0][0],r[0][2]],rx[1]];};},list:function(p,d,c){d=d||_.rtoken(/^\s*/);c=c||null;return(p instanceof Array?_.each(_.product(p.slice(0,-1),_.ignore(d)),p.slice(-1),_.ignore(c)):_.each(_.many(_.each(p,_.ignore(d))),px,_.ignore(c)));},set:function(px,d,c){d=d||_.rtoken(/^\s*/);c=c||null;return function(s){var r=null,p=null,q=null,rx=null,best=[[],s],last=false;for(var i=0;i<px.length;i++){q=null;p=null;r=null;last=(px.length==1);try{r=px[i].call(this,s);}catch(e){continue;}
-rx=[[r[0]],r[1]];if(r[1].length>0&&!last){try{q=d.call(this,r[1]);}catch(ex){last=true;}}else{last=true;}
-if(!last&&q[1].length===0){last=true;}
-if(!last){var qx=[];for(var j=0;j<px.length;j++){if(i!=j){qx.push(px[j]);}}
-p=_.set(qx,d).call(this,q[1]);if(p[0].length>0){rx[0]=rx[0].concat(p[0]);rx[1]=p[1];}}
-if(rx[1].length<best[1].length){best=rx;}
-if(best[1].length===0){break;}}
-if(best[0].length===0){return best;}
-if(c){try{q=c.call(this,best[1]);}catch(ey){throw new $P.Exception(best[1]);}
-best[1]=q[1];}
-return best;};},forward:function(gr,fname){return function(s){return gr[fname].call(this,s);};},replace:function(rule,repl){return function(s){var r=rule.call(this,s);return[repl,r[1]];};},process:function(rule,fn){return function(s){var r=rule.call(this,s);return[fn.call(this,r[0]),r[1]];};},min:function(min,rule){return function(s){var rx=rule.call(this,s);if(rx[0].length<min){throw new $P.Exception(s);}
-return rx;};}};var _generator=function(op){return function(){var args=null,rx=[];if(arguments.length>1){args=Array.prototype.slice.call(arguments);}else if(arguments[0]instanceof Array){args=arguments[0];}
-if(args){for(var i=0,px=args.shift();i<px.length;i++){args.unshift(px[i]);rx.push(op.apply(null,args));args.shift();return rx;}}else{return op.apply(null,arguments);}};};var gx="optional not ignore cache".split(/\s/);for(var i=0;i<gx.length;i++){_[gx[i]]=_generator(_[gx[i]]);}
-var _vector=function(op){return function(){if(arguments[0]instanceof Array){return op.apply(null,arguments[0]);}else{return op.apply(null,arguments);}};};var vx="each any all".split(/\s/);for(var j=0;j<vx.length;j++){_[vx[j]]=_vector(_[vx[j]]);}}());(function(){var $D=Date,$P=$D.prototype,$C=$D.CultureInfo;var flattenAndCompact=function(ax){var rx=[];for(var i=0;i<ax.length;i++){if(ax[i]instanceof Array){rx=rx.concat(flattenAndCompact(ax[i]));}else{if(ax[i]){rx.push(ax[i]);}}}
-return rx;};$D.Grammar={};$D.Translator={hour:function(s){return function(){this.hour=Number(s);};},minute:function(s){return function(){this.minute=Number(s);};},second:function(s){return function(){this.second=Number(s);};},meridian:function(s){return function(){this.meridian=s.slice(0,1).toLowerCase();};},timezone:function(s){return function(){var n=s.replace(/[^\d\+\-]/g,"");if(n.length){this.timezoneOffset=Number(n);}else{this.timezone=s.toLowerCase();}};},day:function(x){var s=x[0];return function(){this.day=Number(s.match(/\d+/)[0]);};},month:function(s){return function(){this.month=(s.length==3)?"jan feb mar apr may jun jul aug sep oct nov dec".indexOf(s)/4:Number(s)-1;};},year:function(s){return function(){var n=Number(s);this.year=((s.length>2)?n:(n+(((n+2000)<$C.twoDigitYearMax)?2000:1900)));};},rday:function(s){return function(){switch(s){case"yesterday":this.days=-1;break;case"tomorrow":this.days=1;break;case"today":this.days=0;break;case"now":this.days=0;this.now=true;break;}};},finishExact:function(x){x=(x instanceof Array)?x:[x];for(var i=0;i<x.length;i++){if(x[i]){x[i].call(this);}}
-var now=new Date();if((this.hour||this.minute)&&(!this.month&&!this.year&&!this.day)){this.day=now.getDate();}
-if(!this.year){this.year=now.getFullYear();}
-if(!this.month&&this.month!==0){this.month=now.getMonth();}
-if(!this.day){this.day=1;}
-if(!this.hour){this.hour=0;}
-if(!this.minute){this.minute=0;}
-if(!this.second){this.second=0;}
-if(this.meridian&&this.hour){if(this.meridian=="p"&&this.hour<12){this.hour=this.hour+12;}else if(this.meridian=="a"&&this.hour==12){this.hour=0;}}
-if(this.day>$D.getDaysInMonth(this.year,this.month)){throw new RangeError(this.day+" is not a valid value for days.");}
-var r=new Date(this.year,this.month,this.day,this.hour,this.minute,this.second);if(this.timezone){r.set({timezone:this.timezone});}else if(this.timezoneOffset){r.set({timezoneOffset:this.timezoneOffset});}
-return r;},finish:function(x){x=(x instanceof Array)?flattenAndCompact(x):[x];if(x.length===0){return null;}
-for(var i=0;i<x.length;i++){if(typeof x[i]=="function"){x[i].call(this);}}
-var today=$D.today();if(this.now&&!this.unit&&!this.operator){return new Date();}else if(this.now){today=new Date();}
-var expression=!!(this.days&&this.days!==null||this.orient||this.operator);var gap,mod,orient;orient=((this.orient=="past"||this.operator=="subtract")?-1:1);if(!this.now&&"hour minute second".indexOf(this.unit)!=-1){today.setTimeToNow();}
-if(this.month||this.month===0){if("year day hour minute second".indexOf(this.unit)!=-1){this.value=this.month+1;this.month=null;expression=true;}}
-if(!expression&&this.weekday&&!this.day&&!this.days){var temp=Date[this.weekday]();this.day=temp.getDate();if(!this.month){this.month=temp.getMonth();}
-this.year=temp.getFullYear();}
-if(expression&&this.weekday&&this.unit!="month"){this.unit="day";gap=($D.getDayNumberFromName(this.weekday)-today.getDay());mod=7;this.days=gap?((gap+(orient*mod))%mod):(orient*mod);}
-if(this.month&&this.unit=="day"&&this.operator){this.value=(this.month+1);this.month=null;}
-if(this.value!=null&&this.month!=null&&this.year!=null){this.day=this.value*1;}
-if(this.month&&!this.day&&this.value){today.set({day:this.value*1});if(!expression){this.day=this.value*1;}}
-if(!this.month&&this.value&&this.unit=="month"&&!this.now){this.month=this.value;expression=true;}
-if(expression&&(this.month||this.month===0)&&this.unit!="year"){this.unit="month";gap=(this.month-today.getMonth());mod=12;this.months=gap?((gap+(orient*mod))%mod):(orient*mod);this.month=null;}
-if(!this.unit){this.unit="day";}
-if(!this.value&&this.operator&&this.operator!==null&&this[this.unit+"s"]&&this[this.unit+"s"]!==null){this[this.unit+"s"]=this[this.unit+"s"]+((this.operator=="add")?1:-1)+(this.value||0)*orient;}else if(this[this.unit+"s"]==null||this.operator!=null){if(!this.value){this.value=1;}
-this[this.unit+"s"]=this.value*orient;}
-if(this.meridian&&this.hour){if(this.meridian=="p"&&this.hour<12){this.hour=this.hour+12;}else if(this.meridian=="a"&&this.hour==12){this.hour=0;}}
-if(this.weekday&&!this.day&&!this.days){var temp=Date[this.weekday]();this.day=temp.getDate();if(temp.getMonth()!==today.getMonth()){this.month=temp.getMonth();}}
-if((this.month||this.month===0)&&!this.day){this.day=1;}
-if(!this.orient&&!this.operator&&this.unit=="week"&&this.value&&!this.day&&!this.month){return Date.today().setWeek(this.value);}
-if(expression&&this.timezone&&this.day&&this.days){this.day=this.days;}
-return(expression)?today.add(this):today.set(this);}};var _=$D.Parsing.Operators,g=$D.Grammar,t=$D.Translator,_fn;g.datePartDelimiter=_.rtoken(/^([\s\-\.\,\/\x27]+)/);g.timePartDelimiter=_.stoken(":");g.whiteSpace=_.rtoken(/^\s*/);g.generalDelimiter=_.rtoken(/^(([\s\,]|at|@|on)+)/);var _C={};g.ctoken=function(keys){var fn=_C[keys];if(!fn){var c=$C.regexPatterns;var kx=keys.split(/\s+/),px=[];for(var i=0;i<kx.length;i++){px.push(_.replace(_.rtoken(c[kx[i]]),kx[i]));}
-fn=_C[keys]=_.any.apply(null,px);}
-return fn;};g.ctoken2=function(key){return _.rtoken($C.regexPatterns[key]);};g.h=_.cache(_.process(_.rtoken(/^(0[0-9]|1[0-2]|[1-9])/),t.hour));g.hh=_.cache(_.process(_.rtoken(/^(0[0-9]|1[0-2])/),t.hour));g.H=_.cache(_.process(_.rtoken(/^([0-1][0-9]|2[0-3]|[0-9])/),t.hour));g.HH=_.cache(_.process(_.rtoken(/^([0-1][0-9]|2[0-3])/),t.hour));g.m=_.cache(_.process(_.rtoken(/^([0-5][0-9]|[0-9])/),t.minute));g.mm=_.cache(_.process(_.rtoken(/^[0-5][0-9]/),t.minute));g.s=_.cache(_.process(_.rtoken(/^([0-5][0-9]|[0-9])/),t.second));g.ss=_.cache(_.process(_.rtoken(/^[0-5][0-9]/),t.second));g.hms=_.cache(_.sequence([g.H,g.m,g.s],g.timePartDelimiter));g.t=_.cache(_.process(g.ctoken2("shortMeridian"),t.meridian));g.tt=_.cache(_.process(g.ctoken2("longMeridian"),t.meridian));g.z=_.cache(_.process(_.rtoken(/^((\+|\-)\s*\d\d\d\d)|((\+|\-)\d\d\:?\d\d)/),t.timezone));g.zz=_.cache(_.process(_.rtoken(/^((\+|\-)\s*\d\d\d\d)|((\+|\-)\d\d\:?\d\d)/),t.timezone));g.zzz=_.cache(_.process(g.ctoken2("timezone"),t.timezone));g.timeSuffix=_.each(_.ignore(g.whiteSpace),_.set([g.tt,g.zzz]));g.time=_.each(_.optional(_.ignore(_.stoken("T"))),g.hms,g.timeSuffix);g.d=_.cache(_.process(_.each(_.rtoken(/^([0-2]\d|3[0-1]|\d)/),_.optional(g.ctoken2("ordinalSuffix"))),t.day));g.dd=_.cache(_.process(_.each(_.rtoken(/^([0-2]\d|3[0-1])/),_.optional(g.ctoken2("ordinalSuffix"))),t.day));g.ddd=g.dddd=_.cache(_.process(g.ctoken("sun mon tue wed thu fri sat"),function(s){return function(){this.weekday=s;};}));g.M=_.cache(_.process(_.rtoken(/^(1[0-2]|0\d|\d)/),t.month));g.MM=_.cache(_.process(_.rtoken(/^(1[0-2]|0\d)/),t.month));g.MMM=g.MMMM=_.cache(_.process(g.ctoken("jan feb mar apr may jun jul aug sep oct nov dec"),t.month));g.y=_.cache(_.process(_.rtoken(/^(\d\d?)/),t.year));g.yy=_.cache(_.process(_.rtoken(/^(\d\d)/),t.year));g.yyy=_.cache(_.process(_.rtoken(/^(\d\d?\d?\d?)/),t.year));g.yyyy=_.cache(_.process(_.rtoken(/^(\d\d\d\d)/),t.year));_fn=function(){return _.each(_.any.apply(null,arguments),_.not(g.ctoken2("timeContext")));};g.day=_fn(g.d,g.dd);g.month=_fn(g.M,g.MMM);g.year=_fn(g.yyyy,g.yy);g.orientation=_.process(g.ctoken("past future"),function(s){return function(){this.orient=s;};});g.operator=_.process(g.ctoken("add subtract"),function(s){return function(){this.operator=s;};});g.rday=_.process(g.ctoken("yesterday tomorrow today now"),t.rday);g.unit=_.process(g.ctoken("second minute hour day week month year"),function(s){return function(){this.unit=s;};});g.value=_.process(_.rtoken(/^\d\d?(st|nd|rd|th)?/),function(s){return function(){this.value=s.replace(/\D/g,"");};});g.expression=_.set([g.rday,g.operator,g.value,g.unit,g.orientation,g.ddd,g.MMM]);_fn=function(){return _.set(arguments,g.datePartDelimiter);};g.mdy=_fn(g.ddd,g.month,g.day,g.year);g.ymd=_fn(g.ddd,g.year,g.month,g.day);g.dmy=_fn(g.ddd,g.day,g.month,g.year);g.date=function(s){return((g[$C.dateElementOrder]||g.mdy).call(this,s));};g.format=_.process(_.many(_.any(_.process(_.rtoken(/^(dd?d?d?|MM?M?M?|yy?y?y?|hh?|HH?|mm?|ss?|tt?|zz?z?)/),function(fmt){if(g[fmt]){return g[fmt];}else{throw $D.Parsing.Exception(fmt);}}),_.process(_.rtoken(/^[^dMyhHmstz]+/),function(s){return _.ignore(_.stoken(s));}))),function(rules){return _.process(_.each.apply(null,rules),t.finishExact);});var _F={};var _get=function(f){return _F[f]=(_F[f]||g.format(f)[0]);};g.formats=function(fx){if(fx instanceof Array){var rx=[];for(var i=0;i<fx.length;i++){rx.push(_get(fx[i]));}
-return _.any.apply(null,rx);}else{return _get(fx);}};g._formats=g.formats(["\"yyyy-MM-ddTHH:mm:ssZ\"","yyyy-MM-ddTHH:mm:ssZ","yyyy-MM-ddTHH:mm:ssz","yyyy-MM-ddTHH:mm:ss","yyyy-MM-ddTHH:mmZ","yyyy-MM-ddTHH:mmz","yyyy-MM-ddTHH:mm","ddd, MMM dd, yyyy H:mm:ss tt","ddd MMM d yyyy HH:mm:ss zzz","MMddyyyy","ddMMyyyy","Mddyyyy","ddMyyyy","Mdyyyy","dMyyyy","yyyy","Mdyy","dMyy","d"]);g._start=_.process(_.set([g.date,g.time,g.expression],g.generalDelimiter,g.whiteSpace),t.finish);g.start=function(s){try{var r=g._formats.call({},s);if(r[1].length===0){return r;}}catch(e){}
-return g._start.call({},s);};$D._parse=$D.parse;$D.parse=function(s){var r=null;if(!s){return null;}
-if(s instanceof Date){return s;}
-try{r=$D.Grammar.start.call({},s.replace(/^\s*(\S*(\s+\S+)*)\s*$/,"$1"));}catch(e){return null;}
-return((r[1].length===0)?r[0]:null);};$D.getParseFunction=function(fx){var fn=$D.Grammar.formats(fx);return function(s){var r=null;try{r=fn.call({},s);}catch(e){return null;}
-return((r[1].length===0)?r[0]:null);};};$D.parseExact=function(s,fx){return $D.getParseFunction(fx)(s);};}());
-</script>
+<dom-module id="project-timeline" assetpath="project-timeline/">
+    <template>
+        <vaadin-column-chart timeline="" id="timelineChart" on-point-click="_pointClicked">
+            <chart animation="true"></chart>
 
-<dom-module id="project-timeline" assetpath="/">
+            <title>Project timeline</title>
+
+            <tooltip header-format="" point-formatter="function() {
+                                    return '<span style=\'color:' + this.color + '\'>● </span>'
+                                    + '<b>Project: </b>' + this.series.name + '<br/>'
+                                    + '<b> Note on ' + moment(this.x).format(moment.localeData().longDateFormat('L')) + ':</b><br/>'
+                                    + '<span> ' + (this.name.length < 30 ? this.name : this.name.substring(0,30) + '...') + '</span>'
+                                    + '<br/><br/>';}" use-html="true" x-date-format="%d.%m.%Y"></tooltip>
+
+            <legend enabled="true"></legend>
+
+            <x-axis type="datetime" min-tick-interval="86400000" crosshair="false">
+            </x-axis>
+
+            <y-axis visible="false"></y-axis>
+
+            <plot-options>
+                <column point-width="15"></column>
+            </plot-options>
+
+            <range-selector enabled="true" input-date-format="%d.%m.%Y" input-edit-date-format="%d.%m.%Y">
+            </range-selector>
+
+            <navigator>
+                <series line-width="0" type="line" id="navigator">
+                </series>
+            </navigator>
+
+            <exporting enabled="false"></exporting>
+
+        </vaadin-column-chart>
+    </template>
+
+
+    <script>
+        Polymer({
+            is: 'project-timeline',
+
+            properties: {
+                projects: Array,
+
+                notes: Array,
+
+                _notesLoaded: {
+                    type: Boolean,
+                    value: false
+                }
+            },
+
+            _allNotesChanged: /^notes$/,
+            _notesAdded: /^notes\.splices$/,
+            _noteUpdated: /^notes\.#(\d*)$/,
+
+            /**
+             * Observe changes to the backend object.
+             * Most of the changes are to add one note to a specific project.
+             * Hence we need to monitor the whole object.
+             */
+            observers: [
+                '_notesChanged(notes.*)',
+                '_projectsChanged(projects.*)'
+            ],
+
+            listeners: {},
+
+            attached: function () {
+                if (this._isChartLoaded() && !this._notesLoaded) {
+                    this.$.timelineChart.chart.showLoading();
+                }
+            },
+
+            /**
+             * Called when backend data changes. Figures out what exactly
+             * changed and updates the chart accordingly.
+             *
+             * @param event event from Polymer signaling that
+             *        something in the backend notes changed
+             * @private
+             */
+            _notesChanged: function (event) {
+                if (!event.base || event.base.length == 0) {
+                    return;
+                }
+
+                if (!this._isChartLoaded()) {
+                    // chart not rendered, create elements
+                    var notes = this._copyObjectArray(event.base);
+                    this._createChartDataElements(notes);
+
+                } else if (this._allNotesChanged.test(event.path)) {
+                    this._addNotesToChart(this._copyObjectArray(event.base));
+
+                } else if (this._notesAdded.test(event.path) && event.value.indexSplices.length > 1) {
+                    var newNotes = [];
+                    for (var i = 0; i < event.value.indexSplices.length; i++) {
+                        var newNoteIndex = event.value.indexSplices[i].index;
+                        var newNote = event.value.indexSplices[i].object[newNoteIndex];
+                        newNotes.push(newNote);
+                    }
+
+                    this._addNotesToChart(this._copyObjectArray(newNotes));
+
+                } else if (this._notesAdded.test(event.path) && event.value.indexSplices.length == 1) {
+                    var newNoteIndex = event.value.indexSplices[0].index;
+                    var newNote = event.value.indexSplices[0].object[newNoteIndex];
+                    this._addNoteToChart(this._copyObject(newNote), true);
+
+                } else if (this._noteUpdated.test(event.path)) {
+                    var newNote = event.value;
+
+                    var chart = this.$.timelineChart.chart;
+
+                    var projectName = newNote.project.name;
+                    var projectNameAsId = this._getProjectNameAsId(projectName);
+                    var noteSeries = chart.get(projectNameAsId);
+
+                    for (var i = 0; i < noteSeries.data.length; i++) {
+                        if (noteSeries.data[i].id === newNote.id) {
+                            noteSeries.data[i].update(this._mapNoteToPoint(this._copyObject(newNote)), true);
+                        }
+                    }
+                }
+
+                this._updateNavigatorSeries(event);
+
+                if (this._isChartLoaded() && !this._notesLoaded) {
+                    this.$.timelineChart.chart.hideLoading();
+                    this._notesLoaded = true;
+                }
+            },
+
+            _projectsChanged: function (event) {
+                console.log("Projects changed: " + event);
+            },
+
+            /**
+             * Update the series for the navigator below the chart. This series
+             * is special, since it must contain all the dates from all the
+             * projects, so that it can show the correct date range.
+             *
+             * @private
+             */
+            _updateNavigatorSeries: function (event) {
+                if (!this._isChartLoaded()) {
+                    // chart not rendered, create elements
+                    var notes = this._copyObjectArray(event.base);
+
+                    var navigatorSeries = [];
+                    for (var i = 0; i < notes.length; i++) {
+                        navigatorSeries.push([notes[i].date, 0]);
+                    }
+
+                    var newNavigatorSeriesDataElement = this._createDataElement(navigatorSeries);
+
+                    var chartElement = Polymer.dom(this.$.timelineChart);
+
+                    var navigatorSeriesElement = chartElement.querySelector('navigator series');
+
+                    var existingNavigatorSeriesDataElement = chartElement.querySelector('navigator series data');
+
+                    if (existingNavigatorSeriesDataElement) {
+                        navigatorSeriesElement.removeChild(existingNavigatorSeriesDataElement);
+                    }
+
+                    navigatorSeriesElement.appendChild(newNavigatorSeriesDataElement);
+
+                } else if (this._allNotesChanged.test(event.path)) {
+                    var navigatorNotes = this._copyObjectArray(event.base);
+                    for (var i = 0; i < navigatorNotes; i++) {
+                        navigatorNotes[i].project.name = "navigator";
+                    }
+
+                    this._addNotesToChart(navigatorNotes);
+
+                } else if (this._notesAdded.test(event.path) && event.value.indexSplices.length > 1) {
+                    var newNotes = [];
+                    for (var i = 0; i < event.value.indexSplices.length; i++) {
+                        var newNoteIndex = event.value.indexSplices[i].index;
+                        var newNote = event.value.indexSplices[i].object[newNoteIndex];
+                        newNotes.push(newNote);
+                    }
+
+                    newNotes = this._copyObjectArray(newNotes);
+                    for (var i = 0; i < newNotes.length; i++) {
+                        newNotes[i].project.name = "navigator";
+                    }
+
+                    this._addNotesToChart(newNotes);
+
+                } else if (this._notesAdded.test(event.path) && event.value.indexSplices.length == 1) {
+                    var newNoteIndex = event.value.indexSplices[0].index;
+                    var newNote = this._copyObject(event.value.indexSplices[0].object[newNoteIndex]);
+                    newNote.project.name = "navigator";
+                    this._addNoteToChart(newNote, true);
+                } else if (this._noteUpdated.test(event.path)) {
+                    var newNote = this._copyObject(event.value);
+
+                    newNote.project.name = "navigator";
+
+                    var chart = this.$.timelineChart.chart;
+                    var noteSeries = chart.get("navigator");
+
+                    for (var i = 0; i < noteSeries.data.length; i++) {
+                        if (noteSeries.data[i].id === newNote.id) {
+                            noteSeries.data[i].update(this._mapNoteToPoint(event.value), true);
+                        }
+                    }
+                }
+            },
+
+            _isChartLoaded: function () {
+                return this.$.timelineChart.isInitialized();
+            },
+
+            _addNotesToChart: function (notes) {
+                for (var i = 0; i < notes.length; i++) {
+                    this._addNoteToChart(notes[i], false);
+                }
+
+                this.$.timelineChart.chart.redraw();
+            },
+
+            _mapNoteToPoint: function (newNote) {
+                return {
+                    x: newNote.date,
+                    name: newNote.note,
+                    y: Math.random() + 1,
+                    noteId: newNote.noteId
+                };
+            },
+
+            _addNoteToChart: function (newNote, redraw) {
+                var chart = this.$.timelineChart.chart;
+
+                var projectName = newNote.project.name;
+                var projectNameAsId = this._getProjectNameAsId(projectName);
+                var noteSeries = chart.get(projectNameAsId);
+
+                if (noteSeries == null) {
+                    noteSeries = chart.addSeries({
+                        name: projectName,
+                        id: projectNameAsId
+                    }, redraw);
+                }
+
+                noteSeries.addPoint(this._mapNoteToPoint(newNote), redraw);
+            },
+
+            _createChartDataElements: function (notes) {
+                var chart = this.$.timelineChart;
+
+                var projectsAndNotes = {};
+                for (var i = 0; i < notes.length; i++) {
+                    var note = notes[i];
+                    if (!projectsAndNotes[note.project.name]) {
+                        projectsAndNotes[note.project.name] = [];
+                    }
+
+                    projectsAndNotes[note.project.name].push(notes[i]);
+                }
+
+                for (var project in projectsAndNotes) {
+                    if (projectsAndNotes.hasOwnProperty(project)) {
+                        var mappedData = this._mapBackendProjectData(projectsAndNotes[project]);
+
+                        var dsElement = this._createDataSeriesElement(project);
+                        var dataElement = this._createDataElement(mappedData);
+                        Polymer.dom(chart).appendChild(dsElement);
+                        Polymer.dom(dsElement).appendChild(dataElement);
+                    }
+                }
+            },
+
+            /**
+             * Map backend data format into something our chart expects.
+             * The note date is the x value.
+             *
+             * @param backendProjectArray array of backend notes
+             * @returns {Array} array of chart point objects
+             * @private
+             */
+            _mapBackendProjectData: function (backendProjectArray) {
+                var newArray = [];
+                for (var i = 0; i < backendProjectArray.length; i++) {
+                    var backendDataItem = backendProjectArray[i];
+                    newArray.push({
+                        x: backendDataItem.date,
+                        name: backendDataItem.note,
+                        y: Math.random() + 1,
+                        noteId: backendDataItem.noteId
+                    });
+                }
+
+                return newArray;
+            },
+
+            _pointClicked: function (event) {
+                this.fire('project-timeline-point-click', {
+                    id: event.detail.point.noteId,
+                    project: event.detail.point.series.name,
+                    date: event.detail.point.x,
+                    note: event.detail.point.name
+                });
+            },
+
+            _getProjectNameAsId: function (projectName) {
+                function camelize(str) {
+                    return str.replace(/(?:^\w|[A-Z]|\b\w)/g, function (letter, index) {
+                        return index == 0 ? letter.toLowerCase() : letter.toUpperCase();
+                    }).replace(/\s+/g, '');
+                }
+
+                return camelize(projectName);
+            },
+
+            /**
+             * Create a data-series element. Corresponds to one project
+             *
+             * @param name name of the project
+             * @returns {Element} a new data-series element
+             * @private
+             */
+            _createDataSeriesElement: function (name) {
+                var dsElement = document.createElement('data-series');
+                dsElement.setAttribute('id', this._getProjectNameAsId(name));
+                dsElement.setAttribute('name', name);
+                return dsElement;
+            },
+
+            /**
+             * Create a data element, corresponds to the list of notes
+             *
+             * @param contentsArray list of note objects
+             * @returns {Element} a new data element
+             * @private
+             */
+            _createDataElement: function (contentsArray) {
+                var dataElement = document.createElement('data');
+                var jsonArray = JSON.stringify(contentsArray);
+                dataElement.textContent = jsonArray.substring(1, jsonArray.length - 1);
+                return dataElement;
+            },
+
+            _copyObject: function (object) {
+                var newValue = Object.assign({}, object);
+                for (var key in newValue) {
+                    if (newValue.hasOwnProperty(key) && typeof newValue[key] === "object") {
+                        newValue[key] = this._copyObject(newValue[key]);
+                    }
+                }
+
+                return newValue;
+            },
+
+            _copyObjectArray: function (array) {
+                var newArray = [];
+                for (var i = 0; i < array.length; i++) {
+                    newArray.push(this._copyObject(array[i]));
+                }
+
+                return newArray;
+            }
+        });
+    </script>
+</dom-module>
+
+<dom-module id="backend-service" assetpath="backend-service/">
+
+    <template>
+        <iron-localstorage name="timeline-storage-projects" value="{{projects}}">
+        </iron-localstorage>
+
+        <iron-localstorage name="timeline-storage-notes" value="{{notes}}" on-iron-localstorage-load-empty="_initializeData">
+        </iron-localstorage>
+    </template>
+
+    <script>
+        Polymer({
+            is: "backend-service",
+
+            /**
+             * @typedef {Object} Project
+             * @property {String} name The name of the project
+             * @property {String} projectId the unique id of the project
+             */
+
+            /**
+             * @typedef {Object} Note
+             * @property {Project} project The project that this note belongs to
+             * @property {String} note the textual contents of this note
+             * @property {Number} date date in Unix time format (ms from Epoch)
+             * @property {String} noteId unique id for this note object
+             */
+
+            properties: {
+                projects: {
+                    type: Array,
+                    notify: true,
+                    value: function () {
+                        return [];
+                    }
+                },
+                notes: {
+                    type: Array,
+                    notify: true,
+                    value: function () {
+                        return [];
+                    }
+                }
+            },
+
+            listeners: {},
+
+            observers: [],
+
+            /**
+             * Ensure that a project with the given name exists and create if
+             * it doesn't.
+             *
+             * @param projectName name of the project to add
+             * @return {Project} the created or existing project object
+             **/
+            addOrGetProject: function (projectName) {
+                if (!this.projectExists(projectName)) {
+                    var newProject = {
+                        name: projectName,
+                        projectId: this._guid() //not really random, for testing
+                    };
+                    this.push('projects', newProject);
+                    return newProject;
+                } else {
+                    return this.getProject(projectName);
+                }
+            },
+
+            /**
+             * Retrieve a project by name. Use {@link #projectExists} to check
+             * before calling this.
+             *
+             * @param projectName name of the project to retrieve
+             * @return {Project} the created or existing project object or
+             *          undefined
+             **/
+            getProject: function (projectName) {
+                for (var i = 0; i < this.projects.length; i++) {
+                    if (this.projects[i].name == projectName) {
+                        return this.projects[i];
+                    }
+                }
+            },
+
+            /**
+             * Add a new note. Data is synchronized automatically and listeners
+             * notified.
+             *
+             * @param projectName non-empty name of the project
+             * @param note non-empty contents of the note
+             * @param date note date in Unix time format (ms from Epoch)
+             * @return {Note} the created note
+             */
+            addNote: function (projectName, note, date) {
+                //ensure new project exists
+                var project = this.addOrGetProject(projectName);
+
+                var newNote = {
+                    project: project,
+                    note: note,
+                    date: date,
+                    noteId: this._guid() //not really random, for testing
+                };
+
+                this.push('notes', newNote);
+
+                return newNote;
+            },
+
+            /**
+             *
+             * @return {Note[]} Returns an array of note objects. Those note objects
+             *                   have note and a date fields. The note arrays
+             *                   are sorted by date.
+             */
+            getProjectNotes: function () {
+                return this.notes.sort(this._noteDateComparator).slice(0);
+            },
+
+            /**
+             * Update an existing note
+             *
+             * @param id {String} note id
+             * @param projectName {String} note project name
+             * @param note {String} note contents
+             * @param noteTime {Number} note date in Unix time format (ms from Epoch)
+             **/
+            updateNote: function (id, projectName, note, noteTime) {
+                for (var i = 0; i < this.notes.length; i++) {
+                    if (this.notes[i].noteId == id) {
+                        //ensure new project exists
+                        var project = this.addOrGetProject(projectName);
+
+                        this.set('notes.' + i, {
+                            project: project,
+                            note: note,
+                            date: noteTime,
+                            noteId: id
+                        });
+                    }
+                }
+            },
+
+            /**
+             * Check if a project with the given name exists
+             *
+             * @param projectName
+             * @return {Boolean}
+             **/
+            projectExists: function (projectName) {
+                for (var i = 0; i < this.projects.length; i++) {
+                    if (this.projects[i].name == projectName) {
+                        return true;
+                    }
+                }
+
+                return false;
+            },
+
+            /**
+             * In case of an empty local storage, initialize with mock data
+             * @private
+             */
+            _initializeData: function () {
+                //yes, this is needed
+                this.projects = [];
+                this.notes = [];
+                this.addNote("Test project 1", "We decided to start on doing XYZ", moment().subtract(6, 'months').valueOf());
+                this.addNote("Test project 1", "Continue working on XYZ. Decided to do ABC as well.", moment().subtract(4, 'months').valueOf());
+                this.addNote("Test project 1", "Work on XYZ stopped as ABC takes all our time.", moment().subtract(2, 'months').valueOf());
+            },
+
+            /**
+             * Compare notes according to their date. Used for array.sort
+             *
+             * @private
+             */
+            _noteDateComparator: function (left, right) {
+                if (left.date < right.date) {
+                    return -1;
+                }
+                if (left.date > right.date) {
+                    return 1;
+                }
+                return 0;
+            },
+
+            /**
+             * Generate a pseudorandom id
+             *
+             * @return {string}
+             * @private
+             */
+            _guid: function () {
+                function s4() {
+                    return Math.floor((1 + Math.random()) * 0x10000)
+                            .toString(16)
+                            .substring(1);
+                }
+
+                return s4() + s4() + '-' + s4() + '-' + s4() + '-' +
+                        s4() + '-' + s4() + s4() + s4();
+            }
+        });
+    </script>
+</dom-module>
+<dom-module id="note-form" assetpath="note-form/">
     <style is="custom-style">
-
-        paper-button#add {
-            background-color: var(--paper-blue-500);
-            color: white;
-        }
 
         paper-button.cancel {
             color: var(--paper-red-300);
@@ -23001,63 +23719,21 @@ return((r[1].length===0)?r[0]:null);};};$D.parseExact=function(s,fx){return $D.g
         }
     </style>
     <template>
-        <backend-service id="backend" data="{{backendData}}"></backend-service>
-
-        <vaadin-column-chart timeline="" id="timelineChart" on-point-click="_pointClicked">
-            <chart animation="true"></chart>
-
-            <title>Project timeline</title>
-
-            <tooltip header-format="" point-formatter="function() {
-                                    return '<span style=\'color:' + this.color + '\'>● </span>'
-                                    + '<b>Project: </b>' + this.series.name + '<br/>'
-                                    + '<b> Note on ' + Highcharts.dateFormat('%d.%m.%Y', this.x) + ':</b><br/>'
-                                    + '<span> ' + (this.name.length < 30 ? this.name : this.name.substring(0,30) + '...') + '</span>'
-                                    + '<br/><br/>';}" use-html="true" x-date-format="%d.%m.%Y"></tooltip>
-
-            <legend enabled="true"></legend>
-
-            <x-axis type="datetime" min-tick-interval="86400000" crosshair="false">
-            </x-axis>
-
-            <y-axis visible="false"></y-axis>
-
-            <plot-options>
-                <column point-width="15"></column>
-            </plot-options>
-
-            <range-selector enabled="true" input-date-format="%d.%m.%Y" input-edit-date-format="%d.%m.%Y">
-            </range-selector>
-
-            <navigator>
-                <series line-width="0" type="line">
-                </series>
-            </navigator>
-
-            <exporting enabled="false"></exporting>
-
-        </vaadin-column-chart>
-
-        <paper-button raised="" on-click="_addNote" id="add">
-            <iron-icon icon="vaadin-icons:plus"></iron-icon>
-            Add note
-        </paper-button>
-
         <div id="formContainer">
             <form is="iron-form" id="form">
                 <paper-toolbar id="formHeader">
-                    <span class="title"></span>
+                    <span class="title">[[title]]</span>
                 </paper-toolbar>
 
-                <input name="id" type="hidden">
+                <input name="id" type="hidden" value="[[id]]">
 
-                <paper-input name="project" id="formNoteProject" label="Project name" required="">
+                <paper-input name="project" id="formNoteProject" label="Project name" required="" value="{{project}}">
                 </paper-input>
 
-                <paper-textarea name="note" id="formNoteContent" label="Note" required="">
+                <paper-textarea name="note" id="formNoteContent" label="Note" required="" value="{{note}}">
                 </paper-textarea>
 
-                <vaadin-date-picker name="noteDate" id="formNoteDate" label="Note date" required="" i18n="[[timelinei18n]]">
+                <vaadin-date-picker name="noteDate" id="formNoteDate" label="Note date" required="" i18n="[[timelinei18n]]" value="{{date}}">
                 </vaadin-date-picker>
 
                 <paper-checkbox name="addAnother" id="formAddAnother" checked="{{addAnotherNote}}">
@@ -23080,60 +23756,60 @@ return((r[1].length===0)?r[0]:null);};};$D.parseExact=function(s,fx){return $D.g
 
     <script>
         Polymer({
-            is: 'project-timeline',
+            is: 'note-form',
 
             properties: {
-                /**
-                 * Object with project names as keys
-                 * to an array of note objects. Those note objects
-                 * have note and a date fields.
-                 */
-                backendData: Object,
-
                 timelinei18n: {
                     type: Object,
                     value: function () {
                         return {
-                            monthNames: [
-                                'January', 'February', 'March', 'April', 'May',
-                                'June', 'July', 'August', 'September', 'October', 'November', 'December'
-                            ],
-                            weekdaysShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
-                            firstDayOfWeek: 1,
-                            today: 'today',
-                            cancel: 'cancel',
+                            monthNames: moment.months(),
+                            weekdaysShort: moment.weekdaysShort(),
+                            firstDayOfWeek: moment.localeData().firstDayOfWeek(),
                             formatDate: function (d) {
-                                return d.getDate() + '.' + (d.getMonth() + 1) + '.' + d.getFullYear();
+                                return moment(d).format(moment.localeData().longDateFormat('L'));
                             }
                         };
                     }
                 },
 
-                addAnotherNote: Boolean
+                addAnotherNote: Boolean,
+                project: String,
+                note: String,
+                date: String,
+                title: String,
+                id: String
             },
 
-            /**
-             * Observe changes to the backend object.
-             * Most of the changes are to add one note to a specific project.
-             * Hence we need to monitor the whole object.
-             */
-            observers: [
-                '_backendDataChanged(backendData.*)'
-            ],
+            observers: [],
 
-            listeners: {
+            listeners: {},
 
+            addNote: function () {
+                this._showForm();
+                this.title = 'Add note';
+            },
+
+            editNote: function (id, projectName, noteDate, noteText) {
+                this._showForm();
+                this.id = id;
+                this.project = projectName;
+                this.date = moment(noteDate).format("YYYY-MM-DD");
+                this.note = noteText;
+                this.title = 'Edit note';
+                this.$.formAddAnother.style.display = 'none';
+                this.addAnotherNote = false;
             },
 
             /**
              * Workaround iron-form incorrectly resetting things
              **/
             _resetForm: function () {
-                this.$.formNoteProject.value = "";
-                this.$.formNoteContent.value = "";
-                this.$.formNoteDate.value = "";
-                this.$.formAddAnother.checked = false;
-                this.$.form.id.value = "";
+                this.project = "";
+                this.note = "";
+                this.date = "";
+                this.addAnotherNote = false;
+                this.id = "";
             },
 
             /**
@@ -23143,12 +23819,7 @@ return((r[1].length===0)?r[0]:null);};};$D.parseExact=function(s,fx){return $D.g
                 if (this.$.form.validate()) {
                     var formData = this.$.form.serialize();
 
-                    if (!formData.id || "" == formData.id) {
-                        this.$.backend.addNote(formData.project, formData.note, Date.parse(formData.noteDate).getTime());
-
-                    } else {
-                        this.$.backend.updateNote(formData.id, formData.project, formData.note, Date.parse(formData.noteDate).getTime());
-                    }
+                    this.fire('note-form-submit', formData);
 
                     this._resetForm();
 
@@ -23164,194 +23835,11 @@ return((r[1].length===0)?r[0]:null);};};$D.parseExact=function(s,fx){return $D.g
             _cancelForm: function () {
                 this._resetForm();
                 this._hideForm();
-            },
 
-            /**
-             * Create a data-series element. Corresponds to one project
-             *
-             * @param name name of the project
-             * @returns {Element} a new data-series element
-             * @private
-             */
-            _createDataSeriesElement: function (name) {
-                var dsElement = document.createElement('data-series');
-                dsElement.setAttribute('id', this._getProjectNameAsId(name));
-                dsElement.setAttribute('name', name);
-                return dsElement;
-            },
-
-            /**
-             * Create a data element, corresponds to the list of notes
-             *
-             * @param contentsArray list of note objects
-             * @returns {Element} a new data element
-             * @private
-             */
-            _createDataElement: function (contentsArray) {
-                var dataElement = document.createElement('data');
-                var jsonArray = JSON.stringify(contentsArray);
-                dataElement.textContent = jsonArray.substring(1, jsonArray.length - 1);
-                return dataElement;
-            },
-
-            /**
-             * Update the series for the navigator below the chart. This series
-             * is special, since it must contain all the dates from all the
-             * projects, so that it can show the correct date range.
-             *
-             * @private
-             */
-            _updateNavigatorSeries: function () {
-                var allNotes = this.$.backend.getAllNotes();
-
-                var navigatorSeries = [];
-                for (var i = 0; i < allNotes.length; i++) {
-                    navigatorSeries.push([allNotes[i].date, 0]);
-                }
-
-                var newNavigatorSeriesDataElement = this._createDataElement(navigatorSeries);
-
-                var chartElement = Polymer.dom(this.$.timelineChart);
-
-                /*var navigatorXaxisElement = chartElement.querySelector('navigator x-axis');
-                 navigatorXaxisElement.setAttribute("min", navigatorSeries[0][0]);*/
-
-                var navigatorSeriesElement = chartElement.querySelector('navigator series');
-
-                var existingNavigatorSeriesDataElement = chartElement.querySelector('navigator series data');
-
-                if (existingNavigatorSeriesDataElement) {
-                    navigatorSeriesElement.removeChild(existingNavigatorSeriesDataElement);
-                }
-
-                navigatorSeriesElement.appendChild(newNavigatorSeriesDataElement);
-            },
-
-            /**
-             * Called when backend data changes. Figures out what exactly
-             * changed and updates the chart DOM accordingly.
-             *
-             * @param valueChangeEvent event from Polymer signaling that
-             *        something in the backend data changed
-             * @private
-             */
-            _backendDataChanged: function (valueChangeEvent) {
-                var allIsNewRegexp = /^backendData$/;
-                var newProjectRegexp = /^backendData\.((\w|\s)*)$/;
-                var newNoteRegexp = /^backendData\.(.*)\.splices$/;
-                var noteUpdateRegexp = /^backendData\.(.*)\.#(\d*)$/;
-
-                var chart = this.$.timelineChart;
-
-                if (allIsNewRegexp.test(valueChangeEvent.path)) {
-                    //everything changed, aka first load
-
-                    var backendNotes = this.$.backend.getProjectNotes();
-
-                    var allDataSeries = Polymer.dom(chart).querySelectorAll('data-series');
-
-                    for (var i = 0; i < allDataSeries.length; i++) {
-                        var dataSeries = allDataSeries[i];
-                        Polymer.dom(chart).removeChild(dataSeries);
-                    }
-
-                    for (var project in backendNotes) {
-                        if (backendNotes.hasOwnProperty(project)) {
-                            var mappedData = this._mapBackendProjectData(backendNotes[project]);
-
-                            var dsElement = this._createDataSeriesElement(project);
-                            var dataElement = this._createDataElement(mappedData);
-                            Polymer.dom(chart).appendChild(dsElement);
-                            Polymer.dom(dsElement).appendChild(dataElement);
-                        }
-                    }
-
-                } else if (newProjectRegexp.test(valueChangeEvent.path)) {
-                    //new project added
-                    var newProjectName = newProjectRegexp.exec(valueChangeEvent.path)[1];
-                    var dsElement = this._createDataSeriesElement(newProjectName);
-                    Polymer.dom(chart).appendChild(dsElement);
-
-                } else if (newNoteRegexp.test(valueChangeEvent.path)) {
-                    //new note added, update whole series
-                    var existingProjectName = newNoteRegexp.exec(valueChangeEvent.path)[1];
-                    var projectNoteArray = valueChangeEvent.value.indexSplices[0].object;
-                    var mappedData = this._mapBackendProjectData(projectNoteArray);
-
-                    var dataSeriesElement = Polymer.dom(chart).querySelector('#' + this._getProjectNameAsId(existingProjectName));
-                    var existingSeriesDataElement = Polymer.dom(dataSeriesElement).querySelector('data');
-                    if (existingSeriesDataElement) {
-                        dataSeriesElement.removeChild(existingSeriesDataElement);
-                    }
-
-                    var newDataElement = this._createDataElement(mappedData);
-                    Polymer.dom(dataSeriesElement).appendChild(newDataElement);
-                } else if (noteUpdateRegexp.test(valueChangeEvent.path)) {
-                    //old note updated, update whole series
-                    var existingProjectName = noteUpdateRegexp.exec(valueChangeEvent.path)[1];
-                    // TODO update just one note instead of whole array?
-                    // var noteIndex = noteUpdateRegexp.exec(valueChangeEvent.path)[2];
-                    var projectNoteArray = valueChangeEvent.base[existingProjectName];
-                    var mappedData = this._mapBackendProjectData(projectNoteArray);
-
-                    var dataSeriesElement = Polymer.dom(chart).querySelector('#' + this._getProjectNameAsId(existingProjectName));
-                    var existingSeriesDataElement = Polymer.dom(dataSeriesElement).querySelector('data');
-                    if (existingSeriesDataElement) {
-                        dataSeriesElement.removeChild(existingSeriesDataElement);
-                    }
-
-                    var newDataElement = this._createDataElement(mappedData);
-                    Polymer.dom(dataSeriesElement).appendChild(newDataElement);
-                }
-
-                this._updateNavigatorSeries();
-
-                if (chart.isInitialized()) {
-                    chart.reloadConfiguration();
-                }
-            },
-
-            /**
-             * Map backend data format into something our chart expects.
-             * The note date is the x value.
-             *
-             * @param backendProjectArray array of backend notes
-             * @returns {Array} array of chart point objects
-             * @private
-             */
-            _mapBackendProjectData: function (backendProjectArray) {
-                var newArray = [];
-                for (var i = 0; i < backendProjectArray.length; i++) {
-                    var backendDataItem = backendProjectArray[i];
-                    newArray.push({
-                        x: backendDataItem.date,
-                        name: backendDataItem.note,
-                        y: Math.random() + 1,
-                        noteId: backendDataItem.noteId
-                    });
-                }
-
-                return newArray;
-            },
-
-            _addNote: function () {
-                this._showForm();
-                this.$.formHeader.querySelector('.title').textContent = 'Add note';
-            },
-
-            _editNote: function (id, projectName, noteDate, noteText) {
-                this._showForm();
-                this.$.form.id.value = id;
-                this.$.formNoteProject.value = projectName;
-                this.$.formNoteDate.value = noteDate.toString("yyyy-MM-dd");
-                this.$.formNoteContent.value = noteText;
-                this.$.formHeader.querySelector('.title').textContent = 'Edit note';
-                this.$.formAddAnother.style.display = 'none';
-                this.addAnotherNote = false;
+                this.fire('note-form-cancel');
             },
 
             _showForm: function () {
-                this.$.add.style.display = "none";
                 this.$.formContainer.style.display = "flex";
                 this.$.formHeader.style.display = "initial";
                 this.$.formAddAnother.style.display = 'initial';
@@ -23359,309 +23847,17 @@ return((r[1].length===0)?r[0]:null);};};$D.parseExact=function(s,fx){return $D.g
             },
 
             _hideForm: function () {
-                this.$.add.style.display = "initial";
                 this.$.formContainer.style.display = "none";
                 this.$.formHeader.style.display = "none";
-            },
-
-            _pointClicked: function (event) {
-                console.log("Click!");
-                console.log(event);
-
-                this._editNote(event.detail.point.noteId, event.detail.point.series.name, new Date(event.detail.point.x), event.detail.point.name);
-            },
-
-            _getProjectNameAsId: function (projectName) {
-                function camelize(str) {
-                    return str.replace(/(?:^\w|[A-Z]|\b\w)/g, function (letter, index) {
-                        return index == 0 ? letter.toLowerCase() : letter.toUpperCase();
-                    }).replace(/\s+/g, '');
-                }
-
-                return camelize(projectName);
-            }
-
-        });
-    </script>
-</dom-module>
-<script type="text/javascript">/**
- * @version: 1.0 Alpha-1
- * @author: Coolite Inc. http://www.coolite.com/
- * @date: 2008-05-13
- * @copyright: Copyright (c) 2006-2008, Coolite Inc. (http://www.coolite.com/). All rights reserved.
- * @license: Licensed under The MIT License. See license.txt and http://www.datejs.com/license/. 
- * @website: http://www.datejs.com/
- */
-Date.CultureInfo={name:"fi-FI",englishName:"Finnish (Finland)",nativeName:"suomi (Suomi)",dayNames:["sunnuntai","maanantai","tiistai","keskiviikko","torstai","perjantai","lauantai"],abbreviatedDayNames:["su","ma","ti","ke","to","pe","la"],shortestDayNames:["su","ma","ti","ke","to","pe","la"],firstLetterDayNames:["s","m","t","k","t","p","l"],monthNames:["tammikuu","helmikuu","maaliskuu","huhtikuu","toukokuu","kesäkuu","heinäkuu","elokuu","syyskuu","lokakuu","marraskuu","joulukuu"],abbreviatedMonthNames:["tammi","helmi","maalis","huhti","touko","kesä","heinä","elo","syys","loka","marras","joulu"],amDesignator:"",pmDesignator:"",firstDayOfWeek:1,twoDigitYearMax:2029,dateElementOrder:"dmy",formatPatterns:{shortDate:"d.M.yyyy",longDate:"d. MMMM'ta 'yyyy",shortTime:"H:mm",longTime:"H:mm:ss",fullDateTime:"d. MMMM'ta 'yyyy H:mm:ss",sortableDateTime:"yyyy-MM-ddTHH:mm:ss",universalSortableDateTime:"yyyy-MM-dd HH:mm:ssZ",rfc1123:"ddd, dd MMM yyyy HH:mm:ss GMT",monthDay:"d. MMMM'ta'",yearMonth:"MMMM yyyy"},regexPatterns:{jan:/^tammi(kuu)?/i,feb:/^helmi(kuu)?/i,mar:/^maalis(kuu)?/i,apr:/^huhti(kuu)?/i,may:/^touko(kuu)?/i,jun:/^kesä(kuu)?/i,jul:/^heinä(kuu)?/i,aug:/^elo(kuu)?/i,sep:/^syys(kuu)?/i,oct:/^loka(kuu)?/i,nov:/^marras(kuu)?/i,dec:/^joulu(kuu)?/i,sun:/^sunnuntai/i,mon:/^maanantai/i,tue:/^tiistai/i,wed:/^keskiviikko/i,thu:/^torstai/i,fri:/^perjantai/i,sat:/^lauantai/i,future:/^next/i,past:/^last|past|prev(ious)?/i,add:/^(\+|aft(er)?|from|hence)/i,subtract:/^(\-|bef(ore)?|ago)/i,yesterday:/^yes(terday)?/i,today:/^t(od(ay)?)?/i,tomorrow:/^tom(orrow)?/i,now:/^n(ow)?/i,millisecond:/^ms|milli(second)?s?/i,second:/^sec(ond)?s?/i,minute:/^mn|min(ute)?s?/i,hour:/^h(our)?s?/i,week:/^w(eek)?s?/i,month:/^m(onth)?s?/i,day:/^d(ay)?s?/i,year:/^y(ear)?s?/i,shortMeridian:/^(a|p)/i,longMeridian:/^(a\.?m?\.?|p\.?m?\.?)/i,timezone:/^((e(s|d)t|c(s|d)t|m(s|d)t|p(s|d)t)|((gmt)?\s*(\+|\-)\s*\d\d\d\d?)|gmt|utc)/i,ordinalSuffix:/^\s*(st|nd|rd|th)/i,timeContext:/^\s*(\:|a(?!u|p)|p)/i},timezones:[{name:"UTC",offset:"-000"},{name:"GMT",offset:"-000"},{name:"EST",offset:"-0500"},{name:"EDT",offset:"-0400"},{name:"CST",offset:"-0600"},{name:"CDT",offset:"-0500"},{name:"MST",offset:"-0700"},{name:"MDT",offset:"-0600"},{name:"PST",offset:"-0800"},{name:"PDT",offset:"-0700"}]};
-(function(){var $D=Date,$P=$D.prototype,$C=$D.CultureInfo,p=function(s,l){if(!l){l=2;}
-return("000"+s).slice(l*-1);};$P.clearTime=function(){this.setHours(0);this.setMinutes(0);this.setSeconds(0);this.setMilliseconds(0);return this;};$P.setTimeToNow=function(){var n=new Date();this.setHours(n.getHours());this.setMinutes(n.getMinutes());this.setSeconds(n.getSeconds());this.setMilliseconds(n.getMilliseconds());return this;};$D.today=function(){return new Date().clearTime();};$D.compare=function(date1,date2){if(isNaN(date1)||isNaN(date2)){throw new Error(date1+" - "+date2);}else if(date1 instanceof Date&&date2 instanceof Date){return(date1<date2)?-1:(date1>date2)?1:0;}else{throw new TypeError(date1+" - "+date2);}};$D.equals=function(date1,date2){return(date1.compareTo(date2)===0);};$D.getDayNumberFromName=function(name){var n=$C.dayNames,m=$C.abbreviatedDayNames,o=$C.shortestDayNames,s=name.toLowerCase();for(var i=0;i<n.length;i++){if(n[i].toLowerCase()==s||m[i].toLowerCase()==s||o[i].toLowerCase()==s){return i;}}
-return-1;};$D.getMonthNumberFromName=function(name){var n=$C.monthNames,m=$C.abbreviatedMonthNames,s=name.toLowerCase();for(var i=0;i<n.length;i++){if(n[i].toLowerCase()==s||m[i].toLowerCase()==s){return i;}}
-return-1;};$D.isLeapYear=function(year){return((year%4===0&&year%100!==0)||year%400===0);};$D.getDaysInMonth=function(year,month){return[31,($D.isLeapYear(year)?29:28),31,30,31,30,31,31,30,31,30,31][month];};$D.getTimezoneAbbreviation=function(offset){var z=$C.timezones,p;for(var i=0;i<z.length;i++){if(z[i].offset===offset){return z[i].name;}}
-return null;};$D.getTimezoneOffset=function(name){var z=$C.timezones,p;for(var i=0;i<z.length;i++){if(z[i].name===name.toUpperCase()){return z[i].offset;}}
-return null;};$P.clone=function(){return new Date(this.getTime());};$P.compareTo=function(date){return Date.compare(this,date);};$P.equals=function(date){return Date.equals(this,date||new Date());};$P.between=function(start,end){return this.getTime()>=start.getTime()&&this.getTime()<=end.getTime();};$P.isAfter=function(date){return this.compareTo(date||new Date())===1;};$P.isBefore=function(date){return(this.compareTo(date||new Date())===-1);};$P.isToday=function(){return this.isSameDay(new Date());};$P.isSameDay=function(date){return this.clone().clearTime().equals(date.clone().clearTime());};$P.addMilliseconds=function(value){this.setMilliseconds(this.getMilliseconds()+value);return this;};$P.addSeconds=function(value){return this.addMilliseconds(value*1000);};$P.addMinutes=function(value){return this.addMilliseconds(value*60000);};$P.addHours=function(value){return this.addMilliseconds(value*3600000);};$P.addDays=function(value){this.setDate(this.getDate()+value);return this;};$P.addWeeks=function(value){return this.addDays(value*7);};$P.addMonths=function(value){var n=this.getDate();this.setDate(1);this.setMonth(this.getMonth()+value);this.setDate(Math.min(n,$D.getDaysInMonth(this.getFullYear(),this.getMonth())));return this;};$P.addYears=function(value){return this.addMonths(value*12);};$P.add=function(config){if(typeof config=="number"){this._orient=config;return this;}
-var x=config;if(x.milliseconds){this.addMilliseconds(x.milliseconds);}
-if(x.seconds){this.addSeconds(x.seconds);}
-if(x.minutes){this.addMinutes(x.minutes);}
-if(x.hours){this.addHours(x.hours);}
-if(x.weeks){this.addWeeks(x.weeks);}
-if(x.months){this.addMonths(x.months);}
-if(x.years){this.addYears(x.years);}
-if(x.days){this.addDays(x.days);}
-return this;};var $y,$m,$d;$P.getWeek=function(){var a,b,c,d,e,f,g,n,s,w;$y=(!$y)?this.getFullYear():$y;$m=(!$m)?this.getMonth()+1:$m;$d=(!$d)?this.getDate():$d;if($m<=2){a=$y-1;b=(a/4|0)-(a/100|0)+(a/400|0);c=((a-1)/4|0)-((a-1)/100|0)+((a-1)/400|0);s=b-c;e=0;f=$d-1+(31*($m-1));}else{a=$y;b=(a/4|0)-(a/100|0)+(a/400|0);c=((a-1)/4|0)-((a-1)/100|0)+((a-1)/400|0);s=b-c;e=s+1;f=$d+((153*($m-3)+2)/5)+58+s;}
-g=(a+b)%7;d=(f+g-e)%7;n=(f+3-d)|0;if(n<0){w=53-((g-s)/5|0);}else if(n>364+s){w=1;}else{w=(n/7|0)+1;}
-$y=$m=$d=null;return w;};$P.getISOWeek=function(){$y=this.getUTCFullYear();$m=this.getUTCMonth()+1;$d=this.getUTCDate();return p(this.getWeek());};$P.setWeek=function(n){return this.moveToDayOfWeek(1).addWeeks(n-this.getWeek());};$D._validate=function(n,min,max,name){if(typeof n=="undefined"){return false;}else if(typeof n!="number"){throw new TypeError(n+" is not a Number.");}else if(n<min||n>max){throw new RangeError(n+" is not a valid value for "+name+".");}
-return true;};$D.validateMillisecond=function(value){return $D._validate(value,0,999,"millisecond");};$D.validateSecond=function(value){return $D._validate(value,0,59,"second");};$D.validateMinute=function(value){return $D._validate(value,0,59,"minute");};$D.validateHour=function(value){return $D._validate(value,0,23,"hour");};$D.validateDay=function(value,year,month){return $D._validate(value,1,$D.getDaysInMonth(year,month),"day");};$D.validateMonth=function(value){return $D._validate(value,0,11,"month");};$D.validateYear=function(value){return $D._validate(value,0,9999,"year");};$P.set=function(config){if($D.validateMillisecond(config.millisecond)){this.addMilliseconds(config.millisecond-this.getMilliseconds());}
-if($D.validateSecond(config.second)){this.addSeconds(config.second-this.getSeconds());}
-if($D.validateMinute(config.minute)){this.addMinutes(config.minute-this.getMinutes());}
-if($D.validateHour(config.hour)){this.addHours(config.hour-this.getHours());}
-if($D.validateMonth(config.month)){this.addMonths(config.month-this.getMonth());}
-if($D.validateYear(config.year)){this.addYears(config.year-this.getFullYear());}
-if($D.validateDay(config.day,this.getFullYear(),this.getMonth())){this.addDays(config.day-this.getDate());}
-if(config.timezone){this.setTimezone(config.timezone);}
-if(config.timezoneOffset){this.setTimezoneOffset(config.timezoneOffset);}
-if(config.week&&$D._validate(config.week,0,53,"week")){this.setWeek(config.week);}
-return this;};$P.moveToFirstDayOfMonth=function(){return this.set({day:1});};$P.moveToLastDayOfMonth=function(){return this.set({day:$D.getDaysInMonth(this.getFullYear(),this.getMonth())});};$P.moveToNthOccurrence=function(dayOfWeek,occurrence){var shift=0;if(occurrence>0){shift=occurrence-1;}
-else if(occurrence===-1){this.moveToLastDayOfMonth();if(this.getDay()!==dayOfWeek){this.moveToDayOfWeek(dayOfWeek,-1);}
-return this;}
-return this.moveToFirstDayOfMonth().addDays(-1).moveToDayOfWeek(dayOfWeek,+1).addWeeks(shift);};$P.moveToDayOfWeek=function(dayOfWeek,orient){var diff=(dayOfWeek-this.getDay()+7*(orient||+1))%7;return this.addDays((diff===0)?diff+=7*(orient||+1):diff);};$P.moveToMonth=function(month,orient){var diff=(month-this.getMonth()+12*(orient||+1))%12;return this.addMonths((diff===0)?diff+=12*(orient||+1):diff);};$P.getOrdinalNumber=function(){return Math.ceil((this.clone().clearTime()-new Date(this.getFullYear(),0,1))/86400000)+1;};$P.getTimezone=function(){return $D.getTimezoneAbbreviation(this.getUTCOffset());};$P.setTimezoneOffset=function(offset){var here=this.getTimezoneOffset(),there=Number(offset)*-6/10;return this.addMinutes(there-here);};$P.setTimezone=function(offset){return this.setTimezoneOffset($D.getTimezoneOffset(offset));};$P.hasDaylightSavingTime=function(){return(Date.today().set({month:0,day:1}).getTimezoneOffset()!==Date.today().set({month:6,day:1}).getTimezoneOffset());};$P.isDaylightSavingTime=function(){return(this.hasDaylightSavingTime()&&new Date().getTimezoneOffset()===Date.today().set({month:6,day:1}).getTimezoneOffset());};$P.getUTCOffset=function(){var n=this.getTimezoneOffset()*-10/6,r;if(n<0){r=(n-10000).toString();return r.charAt(0)+r.substr(2);}else{r=(n+10000).toString();return"+"+r.substr(1);}};$P.getElapsed=function(date){return(date||new Date())-this;};if(!$P.toISOString){$P.toISOString=function(){function f(n){return n<10?'0'+n:n;}
-return'"'+this.getUTCFullYear()+'-'+
-f(this.getUTCMonth()+1)+'-'+
-f(this.getUTCDate())+'T'+
-f(this.getUTCHours())+':'+
-f(this.getUTCMinutes())+':'+
-f(this.getUTCSeconds())+'Z"';};}
-$P._toString=$P.toString;$P.toString=function(format){var x=this;if(format&&format.length==1){var c=$C.formatPatterns;x.t=x.toString;switch(format){case"d":return x.t(c.shortDate);case"D":return x.t(c.longDate);case"F":return x.t(c.fullDateTime);case"m":return x.t(c.monthDay);case"r":return x.t(c.rfc1123);case"s":return x.t(c.sortableDateTime);case"t":return x.t(c.shortTime);case"T":return x.t(c.longTime);case"u":return x.t(c.universalSortableDateTime);case"y":return x.t(c.yearMonth);}}
-var ord=function(n){switch(n*1){case 1:case 21:case 31:return"st";case 2:case 22:return"nd";case 3:case 23:return"rd";default:return"th";}};return format?format.replace(/(\\)?(dd?d?d?|MM?M?M?|yy?y?y?|hh?|HH?|mm?|ss?|tt?|S)/g,function(m){if(m.charAt(0)==="\\"){return m.replace("\\","");}
-x.h=x.getHours;switch(m){case"hh":return p(x.h()<13?(x.h()===0?12:x.h()):(x.h()-12));case"h":return x.h()<13?(x.h()===0?12:x.h()):(x.h()-12);case"HH":return p(x.h());case"H":return x.h();case"mm":return p(x.getMinutes());case"m":return x.getMinutes();case"ss":return p(x.getSeconds());case"s":return x.getSeconds();case"yyyy":return p(x.getFullYear(),4);case"yy":return p(x.getFullYear());case"dddd":return $C.dayNames[x.getDay()];case"ddd":return $C.abbreviatedDayNames[x.getDay()];case"dd":return p(x.getDate());case"d":return x.getDate();case"MMMM":return $C.monthNames[x.getMonth()];case"MMM":return $C.abbreviatedMonthNames[x.getMonth()];case"MM":return p((x.getMonth()+1));case"M":return x.getMonth()+1;case"t":return x.h()<12?$C.amDesignator.substring(0,1):$C.pmDesignator.substring(0,1);case"tt":return x.h()<12?$C.amDesignator:$C.pmDesignator;case"S":return ord(x.getDate());default:return m;}}):this._toString();};}());
-(function(){var $D=Date,$P=$D.prototype,$C=$D.CultureInfo,$N=Number.prototype;$P._orient=+1;$P._nth=null;$P._is=false;$P._same=false;$P._isSecond=false;$N._dateElement="day";$P.next=function(){this._orient=+1;return this;};$D.next=function(){return $D.today().next();};$P.last=$P.prev=$P.previous=function(){this._orient=-1;return this;};$D.last=$D.prev=$D.previous=function(){return $D.today().last();};$P.is=function(){this._is=true;return this;};$P.same=function(){this._same=true;this._isSecond=false;return this;};$P.today=function(){return this.same().day();};$P.weekday=function(){if(this._is){this._is=false;return(!this.is().sat()&&!this.is().sun());}
-return false;};$P.at=function(time){return(typeof time==="string")?$D.parse(this.toString("d")+" "+time):this.set(time);};$N.fromNow=$N.after=function(date){var c={};c[this._dateElement]=this;return((!date)?new Date():date.clone()).add(c);};$N.ago=$N.before=function(date){var c={};c[this._dateElement]=this*-1;return((!date)?new Date():date.clone()).add(c);};var dx=("sunday monday tuesday wednesday thursday friday saturday").split(/\s/),mx=("january february march april may june july august september october november december").split(/\s/),px=("Millisecond Second Minute Hour Day Week Month Year").split(/\s/),pxf=("Milliseconds Seconds Minutes Hours Date Week Month FullYear").split(/\s/),nth=("final first second third fourth fifth").split(/\s/),de;$P.toObject=function(){var o={};for(var i=0;i<px.length;i++){o[px[i].toLowerCase()]=this["get"+pxf[i]]();}
-return o;};$D.fromObject=function(config){config.week=null;return Date.today().set(config);};var df=function(n){return function(){if(this._is){this._is=false;return this.getDay()==n;}
-if(this._nth!==null){if(this._isSecond){this.addSeconds(this._orient*-1);}
-this._isSecond=false;var ntemp=this._nth;this._nth=null;var temp=this.clone().moveToLastDayOfMonth();this.moveToNthOccurrence(n,ntemp);if(this>temp){throw new RangeError($D.getDayName(n)+" does not occur "+ntemp+" times in the month of "+$D.getMonthName(temp.getMonth())+" "+temp.getFullYear()+".");}
-return this;}
-return this.moveToDayOfWeek(n,this._orient);};};var sdf=function(n){return function(){var t=$D.today(),shift=n-t.getDay();if(n===0&&$C.firstDayOfWeek===1&&t.getDay()!==0){shift=shift+7;}
-return t.addDays(shift);};};for(var i=0;i<dx.length;i++){$D[dx[i].toUpperCase()]=$D[dx[i].toUpperCase().substring(0,3)]=i;$D[dx[i]]=$D[dx[i].substring(0,3)]=sdf(i);$P[dx[i]]=$P[dx[i].substring(0,3)]=df(i);}
-var mf=function(n){return function(){if(this._is){this._is=false;return this.getMonth()===n;}
-return this.moveToMonth(n,this._orient);};};var smf=function(n){return function(){return $D.today().set({month:n,day:1});};};for(var j=0;j<mx.length;j++){$D[mx[j].toUpperCase()]=$D[mx[j].toUpperCase().substring(0,3)]=j;$D[mx[j]]=$D[mx[j].substring(0,3)]=smf(j);$P[mx[j]]=$P[mx[j].substring(0,3)]=mf(j);}
-var ef=function(j){return function(){if(this._isSecond){this._isSecond=false;return this;}
-if(this._same){this._same=this._is=false;var o1=this.toObject(),o2=(arguments[0]||new Date()).toObject(),v="",k=j.toLowerCase();for(var m=(px.length-1);m>-1;m--){v=px[m].toLowerCase();if(o1[v]!=o2[v]){return false;}
-if(k==v){break;}}
-return true;}
-if(j.substring(j.length-1)!="s"){j+="s";}
-return this["add"+j](this._orient);};};var nf=function(n){return function(){this._dateElement=n;return this;};};for(var k=0;k<px.length;k++){de=px[k].toLowerCase();$P[de]=$P[de+"s"]=ef(px[k]);$N[de]=$N[de+"s"]=nf(de);}
-$P._ss=ef("Second");var nthfn=function(n){return function(dayOfWeek){if(this._same){return this._ss(arguments[0]);}
-if(dayOfWeek||dayOfWeek===0){return this.moveToNthOccurrence(dayOfWeek,n);}
-this._nth=n;if(n===2&&(dayOfWeek===undefined||dayOfWeek===null)){this._isSecond=true;return this.addSeconds(this._orient);}
-return this;};};for(var l=0;l<nth.length;l++){$P[nth[l]]=(l===0)?nthfn(-1):nthfn(l);}}());
-(function(){Date.Parsing={Exception:function(s){this.message="Parse error at '"+s.substring(0,10)+" ...'";}};var $P=Date.Parsing;var _=$P.Operators={rtoken:function(r){return function(s){var mx=s.match(r);if(mx){return([mx[0],s.substring(mx[0].length)]);}else{throw new $P.Exception(s);}};},token:function(s){return function(s){return _.rtoken(new RegExp("^\s*"+s+"\s*"))(s);};},stoken:function(s){return _.rtoken(new RegExp("^"+s));},until:function(p){return function(s){var qx=[],rx=null;while(s.length){try{rx=p.call(this,s);}catch(e){qx.push(rx[0]);s=rx[1];continue;}
-break;}
-return[qx,s];};},many:function(p){return function(s){var rx=[],r=null;while(s.length){try{r=p.call(this,s);}catch(e){return[rx,s];}
-rx.push(r[0]);s=r[1];}
-return[rx,s];};},optional:function(p){return function(s){var r=null;try{r=p.call(this,s);}catch(e){return[null,s];}
-return[r[0],r[1]];};},not:function(p){return function(s){try{p.call(this,s);}catch(e){return[null,s];}
-throw new $P.Exception(s);};},ignore:function(p){return p?function(s){var r=null;r=p.call(this,s);return[null,r[1]];}:null;},product:function(){var px=arguments[0],qx=Array.prototype.slice.call(arguments,1),rx=[];for(var i=0;i<px.length;i++){rx.push(_.each(px[i],qx));}
-return rx;},cache:function(rule){var cache={},r=null;return function(s){try{r=cache[s]=(cache[s]||rule.call(this,s));}catch(e){r=cache[s]=e;}
-if(r instanceof $P.Exception){throw r;}else{return r;}};},any:function(){var px=arguments;return function(s){var r=null;for(var i=0;i<px.length;i++){if(px[i]==null){continue;}
-try{r=(px[i].call(this,s));}catch(e){r=null;}
-if(r){return r;}}
-throw new $P.Exception(s);};},each:function(){var px=arguments;return function(s){var rx=[],r=null;for(var i=0;i<px.length;i++){if(px[i]==null){continue;}
-try{r=(px[i].call(this,s));}catch(e){throw new $P.Exception(s);}
-rx.push(r[0]);s=r[1];}
-return[rx,s];};},all:function(){var px=arguments,_=_;return _.each(_.optional(px));},sequence:function(px,d,c){d=d||_.rtoken(/^\s*/);c=c||null;if(px.length==1){return px[0];}
-return function(s){var r=null,q=null;var rx=[];for(var i=0;i<px.length;i++){try{r=px[i].call(this,s);}catch(e){break;}
-rx.push(r[0]);try{q=d.call(this,r[1]);}catch(ex){q=null;break;}
-s=q[1];}
-if(!r){throw new $P.Exception(s);}
-if(q){throw new $P.Exception(q[1]);}
-if(c){try{r=c.call(this,r[1]);}catch(ey){throw new $P.Exception(r[1]);}}
-return[rx,(r?r[1]:s)];};},between:function(d1,p,d2){d2=d2||d1;var _fn=_.each(_.ignore(d1),p,_.ignore(d2));return function(s){var rx=_fn.call(this,s);return[[rx[0][0],r[0][2]],rx[1]];};},list:function(p,d,c){d=d||_.rtoken(/^\s*/);c=c||null;return(p instanceof Array?_.each(_.product(p.slice(0,-1),_.ignore(d)),p.slice(-1),_.ignore(c)):_.each(_.many(_.each(p,_.ignore(d))),px,_.ignore(c)));},set:function(px,d,c){d=d||_.rtoken(/^\s*/);c=c||null;return function(s){var r=null,p=null,q=null,rx=null,best=[[],s],last=false;for(var i=0;i<px.length;i++){q=null;p=null;r=null;last=(px.length==1);try{r=px[i].call(this,s);}catch(e){continue;}
-rx=[[r[0]],r[1]];if(r[1].length>0&&!last){try{q=d.call(this,r[1]);}catch(ex){last=true;}}else{last=true;}
-if(!last&&q[1].length===0){last=true;}
-if(!last){var qx=[];for(var j=0;j<px.length;j++){if(i!=j){qx.push(px[j]);}}
-p=_.set(qx,d).call(this,q[1]);if(p[0].length>0){rx[0]=rx[0].concat(p[0]);rx[1]=p[1];}}
-if(rx[1].length<best[1].length){best=rx;}
-if(best[1].length===0){break;}}
-if(best[0].length===0){return best;}
-if(c){try{q=c.call(this,best[1]);}catch(ey){throw new $P.Exception(best[1]);}
-best[1]=q[1];}
-return best;};},forward:function(gr,fname){return function(s){return gr[fname].call(this,s);};},replace:function(rule,repl){return function(s){var r=rule.call(this,s);return[repl,r[1]];};},process:function(rule,fn){return function(s){var r=rule.call(this,s);return[fn.call(this,r[0]),r[1]];};},min:function(min,rule){return function(s){var rx=rule.call(this,s);if(rx[0].length<min){throw new $P.Exception(s);}
-return rx;};}};var _generator=function(op){return function(){var args=null,rx=[];if(arguments.length>1){args=Array.prototype.slice.call(arguments);}else if(arguments[0]instanceof Array){args=arguments[0];}
-if(args){for(var i=0,px=args.shift();i<px.length;i++){args.unshift(px[i]);rx.push(op.apply(null,args));args.shift();return rx;}}else{return op.apply(null,arguments);}};};var gx="optional not ignore cache".split(/\s/);for(var i=0;i<gx.length;i++){_[gx[i]]=_generator(_[gx[i]]);}
-var _vector=function(op){return function(){if(arguments[0]instanceof Array){return op.apply(null,arguments[0]);}else{return op.apply(null,arguments);}};};var vx="each any all".split(/\s/);for(var j=0;j<vx.length;j++){_[vx[j]]=_vector(_[vx[j]]);}}());(function(){var $D=Date,$P=$D.prototype,$C=$D.CultureInfo;var flattenAndCompact=function(ax){var rx=[];for(var i=0;i<ax.length;i++){if(ax[i]instanceof Array){rx=rx.concat(flattenAndCompact(ax[i]));}else{if(ax[i]){rx.push(ax[i]);}}}
-return rx;};$D.Grammar={};$D.Translator={hour:function(s){return function(){this.hour=Number(s);};},minute:function(s){return function(){this.minute=Number(s);};},second:function(s){return function(){this.second=Number(s);};},meridian:function(s){return function(){this.meridian=s.slice(0,1).toLowerCase();};},timezone:function(s){return function(){var n=s.replace(/[^\d\+\-]/g,"");if(n.length){this.timezoneOffset=Number(n);}else{this.timezone=s.toLowerCase();}};},day:function(x){var s=x[0];return function(){this.day=Number(s.match(/\d+/)[0]);};},month:function(s){return function(){this.month=(s.length==3)?"jan feb mar apr may jun jul aug sep oct nov dec".indexOf(s)/4:Number(s)-1;};},year:function(s){return function(){var n=Number(s);this.year=((s.length>2)?n:(n+(((n+2000)<$C.twoDigitYearMax)?2000:1900)));};},rday:function(s){return function(){switch(s){case"yesterday":this.days=-1;break;case"tomorrow":this.days=1;break;case"today":this.days=0;break;case"now":this.days=0;this.now=true;break;}};},finishExact:function(x){x=(x instanceof Array)?x:[x];for(var i=0;i<x.length;i++){if(x[i]){x[i].call(this);}}
-var now=new Date();if((this.hour||this.minute)&&(!this.month&&!this.year&&!this.day)){this.day=now.getDate();}
-if(!this.year){this.year=now.getFullYear();}
-if(!this.month&&this.month!==0){this.month=now.getMonth();}
-if(!this.day){this.day=1;}
-if(!this.hour){this.hour=0;}
-if(!this.minute){this.minute=0;}
-if(!this.second){this.second=0;}
-if(this.meridian&&this.hour){if(this.meridian=="p"&&this.hour<12){this.hour=this.hour+12;}else if(this.meridian=="a"&&this.hour==12){this.hour=0;}}
-if(this.day>$D.getDaysInMonth(this.year,this.month)){throw new RangeError(this.day+" is not a valid value for days.");}
-var r=new Date(this.year,this.month,this.day,this.hour,this.minute,this.second);if(this.timezone){r.set({timezone:this.timezone});}else if(this.timezoneOffset){r.set({timezoneOffset:this.timezoneOffset});}
-return r;},finish:function(x){x=(x instanceof Array)?flattenAndCompact(x):[x];if(x.length===0){return null;}
-for(var i=0;i<x.length;i++){if(typeof x[i]=="function"){x[i].call(this);}}
-var today=$D.today();if(this.now&&!this.unit&&!this.operator){return new Date();}else if(this.now){today=new Date();}
-var expression=!!(this.days&&this.days!==null||this.orient||this.operator);var gap,mod,orient;orient=((this.orient=="past"||this.operator=="subtract")?-1:1);if(!this.now&&"hour minute second".indexOf(this.unit)!=-1){today.setTimeToNow();}
-if(this.month||this.month===0){if("year day hour minute second".indexOf(this.unit)!=-1){this.value=this.month+1;this.month=null;expression=true;}}
-if(!expression&&this.weekday&&!this.day&&!this.days){var temp=Date[this.weekday]();this.day=temp.getDate();if(!this.month){this.month=temp.getMonth();}
-this.year=temp.getFullYear();}
-if(expression&&this.weekday&&this.unit!="month"){this.unit="day";gap=($D.getDayNumberFromName(this.weekday)-today.getDay());mod=7;this.days=gap?((gap+(orient*mod))%mod):(orient*mod);}
-if(this.month&&this.unit=="day"&&this.operator){this.value=(this.month+1);this.month=null;}
-if(this.value!=null&&this.month!=null&&this.year!=null){this.day=this.value*1;}
-if(this.month&&!this.day&&this.value){today.set({day:this.value*1});if(!expression){this.day=this.value*1;}}
-if(!this.month&&this.value&&this.unit=="month"&&!this.now){this.month=this.value;expression=true;}
-if(expression&&(this.month||this.month===0)&&this.unit!="year"){this.unit="month";gap=(this.month-today.getMonth());mod=12;this.months=gap?((gap+(orient*mod))%mod):(orient*mod);this.month=null;}
-if(!this.unit){this.unit="day";}
-if(!this.value&&this.operator&&this.operator!==null&&this[this.unit+"s"]&&this[this.unit+"s"]!==null){this[this.unit+"s"]=this[this.unit+"s"]+((this.operator=="add")?1:-1)+(this.value||0)*orient;}else if(this[this.unit+"s"]==null||this.operator!=null){if(!this.value){this.value=1;}
-this[this.unit+"s"]=this.value*orient;}
-if(this.meridian&&this.hour){if(this.meridian=="p"&&this.hour<12){this.hour=this.hour+12;}else if(this.meridian=="a"&&this.hour==12){this.hour=0;}}
-if(this.weekday&&!this.day&&!this.days){var temp=Date[this.weekday]();this.day=temp.getDate();if(temp.getMonth()!==today.getMonth()){this.month=temp.getMonth();}}
-if((this.month||this.month===0)&&!this.day){this.day=1;}
-if(!this.orient&&!this.operator&&this.unit=="week"&&this.value&&!this.day&&!this.month){return Date.today().setWeek(this.value);}
-if(expression&&this.timezone&&this.day&&this.days){this.day=this.days;}
-return(expression)?today.add(this):today.set(this);}};var _=$D.Parsing.Operators,g=$D.Grammar,t=$D.Translator,_fn;g.datePartDelimiter=_.rtoken(/^([\s\-\.\,\/\x27]+)/);g.timePartDelimiter=_.stoken(":");g.whiteSpace=_.rtoken(/^\s*/);g.generalDelimiter=_.rtoken(/^(([\s\,]|at|@|on)+)/);var _C={};g.ctoken=function(keys){var fn=_C[keys];if(!fn){var c=$C.regexPatterns;var kx=keys.split(/\s+/),px=[];for(var i=0;i<kx.length;i++){px.push(_.replace(_.rtoken(c[kx[i]]),kx[i]));}
-fn=_C[keys]=_.any.apply(null,px);}
-return fn;};g.ctoken2=function(key){return _.rtoken($C.regexPatterns[key]);};g.h=_.cache(_.process(_.rtoken(/^(0[0-9]|1[0-2]|[1-9])/),t.hour));g.hh=_.cache(_.process(_.rtoken(/^(0[0-9]|1[0-2])/),t.hour));g.H=_.cache(_.process(_.rtoken(/^([0-1][0-9]|2[0-3]|[0-9])/),t.hour));g.HH=_.cache(_.process(_.rtoken(/^([0-1][0-9]|2[0-3])/),t.hour));g.m=_.cache(_.process(_.rtoken(/^([0-5][0-9]|[0-9])/),t.minute));g.mm=_.cache(_.process(_.rtoken(/^[0-5][0-9]/),t.minute));g.s=_.cache(_.process(_.rtoken(/^([0-5][0-9]|[0-9])/),t.second));g.ss=_.cache(_.process(_.rtoken(/^[0-5][0-9]/),t.second));g.hms=_.cache(_.sequence([g.H,g.m,g.s],g.timePartDelimiter));g.t=_.cache(_.process(g.ctoken2("shortMeridian"),t.meridian));g.tt=_.cache(_.process(g.ctoken2("longMeridian"),t.meridian));g.z=_.cache(_.process(_.rtoken(/^((\+|\-)\s*\d\d\d\d)|((\+|\-)\d\d\:?\d\d)/),t.timezone));g.zz=_.cache(_.process(_.rtoken(/^((\+|\-)\s*\d\d\d\d)|((\+|\-)\d\d\:?\d\d)/),t.timezone));g.zzz=_.cache(_.process(g.ctoken2("timezone"),t.timezone));g.timeSuffix=_.each(_.ignore(g.whiteSpace),_.set([g.tt,g.zzz]));g.time=_.each(_.optional(_.ignore(_.stoken("T"))),g.hms,g.timeSuffix);g.d=_.cache(_.process(_.each(_.rtoken(/^([0-2]\d|3[0-1]|\d)/),_.optional(g.ctoken2("ordinalSuffix"))),t.day));g.dd=_.cache(_.process(_.each(_.rtoken(/^([0-2]\d|3[0-1])/),_.optional(g.ctoken2("ordinalSuffix"))),t.day));g.ddd=g.dddd=_.cache(_.process(g.ctoken("sun mon tue wed thu fri sat"),function(s){return function(){this.weekday=s;};}));g.M=_.cache(_.process(_.rtoken(/^(1[0-2]|0\d|\d)/),t.month));g.MM=_.cache(_.process(_.rtoken(/^(1[0-2]|0\d)/),t.month));g.MMM=g.MMMM=_.cache(_.process(g.ctoken("jan feb mar apr may jun jul aug sep oct nov dec"),t.month));g.y=_.cache(_.process(_.rtoken(/^(\d\d?)/),t.year));g.yy=_.cache(_.process(_.rtoken(/^(\d\d)/),t.year));g.yyy=_.cache(_.process(_.rtoken(/^(\d\d?\d?\d?)/),t.year));g.yyyy=_.cache(_.process(_.rtoken(/^(\d\d\d\d)/),t.year));_fn=function(){return _.each(_.any.apply(null,arguments),_.not(g.ctoken2("timeContext")));};g.day=_fn(g.d,g.dd);g.month=_fn(g.M,g.MMM);g.year=_fn(g.yyyy,g.yy);g.orientation=_.process(g.ctoken("past future"),function(s){return function(){this.orient=s;};});g.operator=_.process(g.ctoken("add subtract"),function(s){return function(){this.operator=s;};});g.rday=_.process(g.ctoken("yesterday tomorrow today now"),t.rday);g.unit=_.process(g.ctoken("second minute hour day week month year"),function(s){return function(){this.unit=s;};});g.value=_.process(_.rtoken(/^\d\d?(st|nd|rd|th)?/),function(s){return function(){this.value=s.replace(/\D/g,"");};});g.expression=_.set([g.rday,g.operator,g.value,g.unit,g.orientation,g.ddd,g.MMM]);_fn=function(){return _.set(arguments,g.datePartDelimiter);};g.mdy=_fn(g.ddd,g.month,g.day,g.year);g.ymd=_fn(g.ddd,g.year,g.month,g.day);g.dmy=_fn(g.ddd,g.day,g.month,g.year);g.date=function(s){return((g[$C.dateElementOrder]||g.mdy).call(this,s));};g.format=_.process(_.many(_.any(_.process(_.rtoken(/^(dd?d?d?|MM?M?M?|yy?y?y?|hh?|HH?|mm?|ss?|tt?|zz?z?)/),function(fmt){if(g[fmt]){return g[fmt];}else{throw $D.Parsing.Exception(fmt);}}),_.process(_.rtoken(/^[^dMyhHmstz]+/),function(s){return _.ignore(_.stoken(s));}))),function(rules){return _.process(_.each.apply(null,rules),t.finishExact);});var _F={};var _get=function(f){return _F[f]=(_F[f]||g.format(f)[0]);};g.formats=function(fx){if(fx instanceof Array){var rx=[];for(var i=0;i<fx.length;i++){rx.push(_get(fx[i]));}
-return _.any.apply(null,rx);}else{return _get(fx);}};g._formats=g.formats(["\"yyyy-MM-ddTHH:mm:ssZ\"","yyyy-MM-ddTHH:mm:ssZ","yyyy-MM-ddTHH:mm:ssz","yyyy-MM-ddTHH:mm:ss","yyyy-MM-ddTHH:mmZ","yyyy-MM-ddTHH:mmz","yyyy-MM-ddTHH:mm","ddd, MMM dd, yyyy H:mm:ss tt","ddd MMM d yyyy HH:mm:ss zzz","MMddyyyy","ddMMyyyy","Mddyyyy","ddMyyyy","Mdyyyy","dMyyyy","yyyy","Mdyy","dMyy","d"]);g._start=_.process(_.set([g.date,g.time,g.expression],g.generalDelimiter,g.whiteSpace),t.finish);g.start=function(s){try{var r=g._formats.call({},s);if(r[1].length===0){return r;}}catch(e){}
-return g._start.call({},s);};$D._parse=$D.parse;$D.parse=function(s){var r=null;if(!s){return null;}
-if(s instanceof Date){return s;}
-try{r=$D.Grammar.start.call({},s.replace(/^\s*(\S*(\s+\S+)*)\s*$/,"$1"));}catch(e){return null;}
-return((r[1].length===0)?r[0]:null);};$D.getParseFunction=function(fx){var fn=$D.Grammar.formats(fx);return function(s){var r=null;try{r=fn.call({},s);}catch(e){return null;}
-return((r[1].length===0)?r[0]:null);};};$D.parseExact=function(s,fx){return $D.getParseFunction(fx)(s);};}());
-</script>
-
-
-<dom-module id="backend-service" assetpath="/">
-
-    <template>
-        <iron-localstorage name="project-timeline-storage" value="{{data}}"></iron-localstorage>
-    </template>
-
-    <script>
-        Polymer({
-            is: "backend-service",
-
-            properties: {
-                data: {
-                    type: Object,
-                    notify: true
-
-                }
-            },
-
-            listeners: {
-                'iron-localstorage-load-empty': '_initializeData'
-            },
-
-            /**
-             * Add a new note. Data is synchronized automatically and listeners
-             * notified.
-             *
-             * @param project non-empty name of the project
-             * @param note non-empty contents of the note
-             * @param date note date in Unix time format (ms from Epoch)
-             */
-            addNote: function (project, note, date) {
-                if (!this.data[project]) {
-                    this.set('data.' + project, []);
-                }
-
-                this.push('data.' + project, {
-                    note: note,
-                    date: date,
-                    noteId: this._guid() //not really random, for testing
-                });
-            },
-
-            /**
-             *
-             * @returns {Object} Returns an object with project names as keys
-             *                   to an array of note objects. Those note objects
-             *                   have note and a date fields. The note arrays
-             *                   are sorted by date.
-             */
-            getProjectNotes: function () {
-                for (var project in this.data) {
-                    if (this.data.hasOwnProperty(project)) {
-                        this.data[project].sort(this._noteDateComparator);
-                    }
-                }
-
-                return this.data;
-            },
-
-            /**
-             * Retrieve all the notes in all the projects
-             *
-             * @returns {Array} all known note objects in one, sorted array
-             */
-            getAllNotes: function () {
-                var allNotes = [];
-                for (var project in this.data) {
-                    if (this.data.hasOwnProperty(project)) {
-                        for (var i = 0; i < this.data[project].length; i++) {
-                            allNotes.push(this.data[project][i]);
-                        }
-                    }
-                }
-
-                allNotes.sort(this._noteDateComparator);
-
-                return allNotes;
-            },
-
-            updateNote: function (id, project, note, noteTime) {
-                var notes = this.data[project];
-                for (var i = 0; i < notes.length; i++) {
-                    if (notes[i].noteId == id) {
-                        var dataPath = 'data.' + project + '.' + i;
-                        this.set(dataPath, {
-                            note: note,
-                            date: noteTime,
-                            noteId: id
-                        });
-                    }
-                }
-            },
-
-            /**
-             * In case of an empty local storage, initialize with mock data
-             * @private
-             */
-            _initializeData: function () {
-                this.data = {};
-                this.addNote("Test project 1", "We decided to start on doing XYZ", new Date().last().december().getTime());
-                this.addNote("Test project 1", "Continue working on XYZ. Decided to do ABC as well.", new Date().last().january().getTime());
-                this.addNote("Test project 1", "Work on XYZ stopped as ABC takes all our time.", new Date().last().february().getTime());
-            },
-
-            /**
-             * Compare notes according to their date. Used for array.sort
-             *
-             * @private
-             */
-            _noteDateComparator: function (left, right) {
-                if (left.date < right.date) {
-                    return -1;
-                }
-                if (left.date > right.date) {
-                    return 1;
-                }
-                return 0;
-            },
-
-            _guid: function () {
-                function s4() {
-                    return Math.floor((1 + Math.random()) * 0x10000)
-                            .toString(16)
-                            .substring(1);
-                }
-
-                return s4() + s4() + '-' + s4() + '-' + s4() + '-' +
-                        s4() + '-' + s4() + s4() + s4();
             }
         });
     </script>
 </dom-module>
-</div></body></html>
+<style is="custom-style">
+
+    paper-button#add {
+        background-color: var(--paper-blue-500);
+        color: white;
+    }
+
+</style></div></body></html>
