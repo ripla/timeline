@@ -1,40 +1,122 @@
 <!doctype html>
 <html lang="en">
-    <head>
-        <meta charset="utf-8">
+<head>
+    <meta charset="utf-8">
 
-        <!-- build:js bower_components/webcomponentsjs/webcomponents-lite.min.js -->
-        <script src="bower_components/webcomponentsjs/webcomponents-lite.js"></script>
-        <!-- endbuild -->
+    <!-- build:js bower_components/webcomponentsjs/webcomponents-lite.min.js -->
+    <script src="bower_components/webcomponentsjs/webcomponents-lite.js"></script>
+    <!-- endbuild -->
 
-        <!-- build:js bower_components/moment/min/moment.min.js -->
-        <script type="text/javascript" src="bower_components/moment/moment.js"></script>
-        <!-- endbuild -->
+    <!-- build:js bower_components/moment/min/moment.min.js -->
+    <script type="text/javascript"
+            src="bower_components/moment/moment.js"></script>
+    <!-- endbuild -->
 
-        <!-- Use unminified for now since we only support one locale -->
-        <script type="text/javascript" src="bower_components/moment/locale/fi.js"></script>
+    <!-- Use unminified for now since we only support one locale -->
+    <script type="text/javascript"
+            src="bower_components/moment/locale/fi.js"></script>
 
-        <link href="elements/elements.html" rel="import">
-    </head>
+    <link href="elements/elements.html" rel="import">
 
-    <body unresolved>
-        <template is="dom-bind" id="app">
-            <backend-service notes="{{notes}}" projects="{{projects}}"></backend-service>
 
-            <project-timeline notes="[[notes]]" projects="[[projects]]"></project-timeline>
+</head>
 
-            <paper-button raised
-                          id="add">
-                <iron-icon icon="vaadin-icons:plus"></iron-icon>
-                Add note
-            </paper-button>
+<body unresolved>
+<template is="dom-bind" id="app">
+    <backend-service notes="{{notes}}"
+                     projects="{{projects}}"></backend-service>
 
-            <note-form></note-form>
-        </template>
+    <paper-drawer-panel id="paperDrawerPanel">
 
-        <!-- build:js scripts/app.js -->
-        <script src="scripts/app.js"></script>
-        <!-- endbuild-->
+        <paper-scroll-header-panel drawer fixed>
+            <paper-toolbar id="drawerToolbar">
+                <span class="menu-name">Menu</span>
+            </paper-toolbar>
 
-    </body>
+            <paper-menu class="app-menu" attr-for-selected="data-route" selected="[[route]]">
+                <a data-route="home" href="{{baseUrl}}">
+                    <iron-icon icon="vaadin-icons:home"></iron-icon>
+                    <span>Home</span>
+                </a>
+
+                <a data-route="timeline" href="{{baseUrl}}timeline">
+                    <iron-icon icon="vaadin-icons:time-forward"></iron-icon>
+                    <span>Note timeline</span>
+                </a>
+
+                <a data-route="projects" href="{{baseUrl}}projects">
+                    <iron-icon icon="vaadin-icons:notebook"></iron-icon>
+                    <span>Projects</span>
+                </a>
+            </paper-menu>
+        </paper-scroll-header-panel>
+
+        <paper-scroll-header-panel main id="headerPanelMain">
+            <paper-toolbar id="mainToolbar" class="tall">
+                <div class="middle middle-container">
+                    <div class="app-name">Project notes</div>
+                </div>
+
+                <div class="bottom bottom-container">
+                    <div class="bottom-title">Projects, notes, timelines. Oh
+                        my!
+                    </div>
+                </div>
+
+            </paper-toolbar>
+
+            <div class="content">
+                <iron-pages attr-for-selected="data-route" selected="{{route}}">
+
+                    <section data-route="home" tabindex="-1">
+                        <paper-material elevation="1">
+                            <h1 class="page-title" tabindex="-1">Home</h1>
+                        </paper-material>
+                    </section>
+
+                    <section data-route="timeline" tabindex="-1">
+                        <paper-material elevation="1">
+                            <h1 class="page-title" tabindex="-1">Timeline</h1>
+                            <project-timeline notes="[[notes]]"
+                                              projects="[[projects]]"></project-timeline>
+
+                            <paper-button raised
+                                          id="add">
+                                <iron-icon icon="vaadin-icons:plus"></iron-icon>
+                                Add note
+                            </paper-button>
+
+                            <note-form></note-form>
+                        </paper-material>
+                    </section>
+
+                    <section data-route="projects" tabindex="-1">
+                        <paper-material elevation="1">
+                            <h1 class="page-title" tabindex="-1">Projects</h1>
+                            <iron-data-table items="[[projects]]">
+                                <data-table-column name="Id">
+                                    <template>[[item.projectId]]</template>
+                                </data-table-column>
+                                <data-table-column name="Name">
+                                    <template>[[item.name]]</template>
+                                </data-table-column>
+                            </iron-data-table>
+                        </paper-material>
+                    </section>
+
+                </iron-pages>
+            </div>
+        </paper-scroll-header-panel>
+    </paper-drawer-panel>
+    <paper-toast id="toast">
+        <span class="toast-hide-button" role="button" tabindex="0"
+              onclick="app.$.toast.hide()">Ok</span>
+    </paper-toast>
+</template>
+
+<!-- build:js scripts/app.js -->
+<script src="scripts/app.js"></script>
+<!-- endbuild-->
+
+</body>
 </html>

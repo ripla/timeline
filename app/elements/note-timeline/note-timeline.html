@@ -3,10 +3,10 @@
 <dom-module id="project-timeline">
     <template>
         <vaadin-column-chart timeline id="timelineChart"
-                             on-point-click="_pointClicked">
+                             on-point-click="_pointClicked" flex>
             <chart animation="true"></chart>
 
-            <title>Project timeline</title>
+            <title></title>
 
             <tooltip header-format=""
                      point-formatter="function() {
@@ -84,6 +84,10 @@
                 if (this._isChartLoaded() && !this._notesLoaded) {
                     this.$.timelineChart.chart.showLoading();
                 }
+
+                this.async(function(){
+                    this.$.timelineChart.chart.reflow();
+                }, 1);
             },
 
             /**

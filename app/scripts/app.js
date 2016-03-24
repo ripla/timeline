@@ -1,17 +1,22 @@
 (function (document) {
     'use strict';
 
+    var app = document.querySelector('#app');
+
+    // Sets app default base URL
+    app.baseUrl = '/';
+    if (window.location.port === '') {  // if production
+        // Uncomment app.baseURL below and
+        app.baseUrl = '/timeline/';
+    }
+
     moment.locale('fi');
 
     app.addEventListener('dom-change', function () {
-        console.log('dom-change');
     });
 
     // See https://github.com/Polymer/polymer/issues/1381
     window.addEventListener('WebComponentsReady', function () {
-        console.log('WebComponentsReady');
-
-        var app = document.querySelector('#app');
         var timeline = document.querySelector('project-timeline');
         var form = document.querySelector('note-form');
         var backend = document.querySelector('backend-service');
@@ -46,6 +51,5 @@
             addButton.style.display = 'none';
         });
     });
-
 
 })(document);
