@@ -64,6 +64,10 @@
                 }
             },
 
+            _allNotesChanged: /^notes$/,
+            _notesAdded: /^notes\.splices$/,
+            _noteUpdated: /^notes\.#(\d*)$/,
+
             /**
              * Observe changes to the backend object.
              * Most of the changes are to add one note to a specific project.
@@ -91,21 +95,19 @@
              * @private
              */
             _notesChanged: function (event) {
-                console.log("Notes changed: " + event);
-
                 if (!event.base || event.base.length == 0) {
                     return;
                 }
 
                 if (!this._isChartLoaded()) {
                     // chart not rendered, create elements
-                    var notes = event.base;
+                    var notes = this._copyObjectArray(event.base);
                     this._createChartDataElements(notes);
 
-                } else if ("notes" === event.path) {
-                    this._addNotesToChart(event.base);
+                } else if (this._allNotesChanged.test(event.path)) {
+                    this._addNotesToChart(this._copyObjectArray(event.base));
 
-                } else if (event.value.indexSplices.length > 1) {
+                } else if (this._notesAdded.test(event.path) && event.value.indexSplices.length > 1) {
                     var newNotes = [];
                     for (var i = 0; i < event.value.indexSplices.length; i++) {
                         var newNoteIndex = event.value.indexSplices[i].index;
@@ -113,20 +115,34 @@
                         newNotes.push(newNote);
                     }
 
-                    this._addNotesToChart(newNotes);
+                    this._addNotesToChart(this._copyObjectArray(newNotes));
 
-                } else if (event.value.indexSplices.length == 1) {
+                } else if (this._notesAdded.test(event.path) && event.value.indexSplices.length == 1) {
                     var newNoteIndex = event.value.indexSplices[0].index;
                     var newNote = event.value.indexSplices[0].object[newNoteIndex];
-                    this._addNoteToChart(newNote, true);
+                    this._addNoteToChart(this._copyObject(newNote), true);
+
+                } else if (this._noteUpdated.test(event.path)) {
+                    var newNote = event.value;
+
+                    var chart = this.$.timelineChart.chart;
+
+                    var projectName = newNote.project.name;
+                    var projectNameAsId = this._getProjectNameAsId(projectName);
+                    var noteSeries = chart.get(projectNameAsId);
+
+                    for (var i = 0; i < noteSeries.data.length; i++) {
+                        if (noteSeries.data[i].id === newNote.id) {
+                            noteSeries.data[i].update(this._mapNoteToPoint(this._copyObject(newNote)), true);
+                        }
+                    }
                 }
 
                 this._updateNavigatorSeries(event);
 
-                this._notesLoaded = true;
-
-                if (this._isChartLoaded()) {
+                if (this._isChartLoaded() && !this._notesLoaded) {
                     this.$.timelineChart.chart.hideLoading();
+                    this._notesLoaded = true;
                 }
             },
 
@@ -144,7 +160,7 @@
             _updateNavigatorSeries: function (event) {
                 if (!this._isChartLoaded()) {
                     // chart not rendered, create elements
-                    var notes = event.base;
+                    var notes = this._copyObjectArray(event.base);
 
                     var navigatorSeries = [];
                     for (var i = 0; i < notes.length; i++) {
@@ -165,29 +181,47 @@
 
                     navigatorSeriesElement.appendChild(newNavigatorSeriesDataElement);
 
-                } else if (event.path === "notes") {
-                    var navigatorNotes = event.base.slice();
+                } else if (this._allNotesChanged.test(event.path)) {
+                    var navigatorNotes = this._copyObjectArray(event.base);
                     for (var i = 0; i < navigatorNotes; i++) {
                         navigatorNotes[i].project.name = "navigator";
                     }
 
                     this._addNotesToChart(navigatorNotes);
 
-                } else if (event.value.indexSplices.length > 1) {
+                } else if (this._notesAdded.test(event.path) && event.value.indexSplices.length > 1) {
                     var newNotes = [];
                     for (var i = 0; i < event.value.indexSplices.length; i++) {
                         var newNoteIndex = event.value.indexSplices[i].index;
                         var newNote = event.value.indexSplices[i].object[newNoteIndex];
-                        newNote.project.name = "navigator";
                         newNotes.push(newNote);
                     }
+
+                    newNotes = this._copyObjectArray(newNotes);
+                    for (var i = 0; i < newNotes.length; i++) {
+                        newNotes[i].project.name = "navigator";
+                    }
+
                     this._addNotesToChart(newNotes);
 
-                } else if (event.value.indexSplices.length == 1) {
+                } else if (this._notesAdded.test(event.path) && event.value.indexSplices.length == 1) {
                     var newNoteIndex = event.value.indexSplices[0].index;
-                    var newNote = event.value.indexSplices[0].object[newNoteIndex];
-                    newNote.name = "navigator";
+                    var newNote = this._copyObject(event.value.indexSplices[0].object[newNoteIndex]);
+                    newNote.project.name = "navigator";
                     this._addNoteToChart(newNote, true);
+                } else if (this._noteUpdated.test(event.path)) {
+                    var newNote = this._copyObject(event.value);
+
+                    newNote.project.name = "navigator";
+
+                    var chart = this.$.timelineChart.chart;
+                    var noteSeries = chart.get("navigator");
+
+                    for (var i = 0; i < noteSeries.data.length; i++) {
+                        if (noteSeries.data[i].id === newNote.id) {
+                            noteSeries.data[i].update(this._mapNoteToPoint(event.value), true);
+                        }
+                    }
                 }
             },
 
@@ -201,6 +235,15 @@
                 }
 
                 this.$.timelineChart.chart.redraw();
+            },
+
+            _mapNoteToPoint: function (newNote) {
+                return {
+                    x: newNote.date,
+                    name: newNote.note,
+                    y: Math.random() + 1,
+                    noteId: newNote.noteId
+                };
             },
 
             _addNoteToChart: function (newNote, redraw) {
@@ -217,14 +260,7 @@
                     }, redraw);
                 }
 
-                console.log("Add point " + JSON.stringify(newNote));
-
-                noteSeries.addPoint({
-                    x: newNote.date,
-                    name: newNote.note,
-                    y: Math.random() + 1,
-                    noteId: newNote.noteId
-                }, redraw);
+                noteSeries.addPoint(this._mapNoteToPoint(newNote), redraw);
             },
 
             _createChartDataElements: function (notes) {
@@ -271,8 +307,6 @@
                         noteId: backendDataItem.noteId
                     });
                 }
-
-                console.log(newArray);
 
                 return newArray;
             },
@@ -322,6 +356,26 @@
                 var jsonArray = JSON.stringify(contentsArray);
                 dataElement.textContent = jsonArray.substring(1, jsonArray.length - 1);
                 return dataElement;
+            },
+
+            _copyObject: function (object) {
+                var newValue = Object.assign({}, object);
+                for (var key in newValue) {
+                    if (newValue.hasOwnProperty(key) && typeof newValue[key] === "object") {
+                        newValue[key] = this._copyObject(newValue[key]);
+                    }
+                }
+
+                return newValue;
+            },
+
+            _copyObjectArray: function (array) {
+                var newArray = [];
+                for (var i = 0; i < array.length; i++) {
+                    newArray.push(this._copyObject(array[i]));
+                }
+
+                return newArray;
             }
         });
     </script>
