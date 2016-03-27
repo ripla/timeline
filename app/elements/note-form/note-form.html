@@ -59,12 +59,15 @@
 
                 <input name="id" type="hidden" value="[[id]]">
 
-                <paper-input name="project"
-                             id="formNoteProject"
-                             label="Project name"
-                             required
-                             value="{{project}}">
-                </paper-input>
+                <vaadin-combo-box name="project"
+                                  id="formNoteProject"
+                                  label="Project name"
+                                  required
+                                  items="[[projects]]"
+                                  item-value-path="name"
+                                  item-label-path="name"
+                                  value="{{project}}">
+                </vaadin-combo-box>
 
                 <paper-textarea name="note"
                                 id="formNoteContent"
@@ -122,6 +125,9 @@
                         };
                     }
                 },
+
+                projects: Array,
+
 
                 addAnotherNote: Boolean,
                 project: String,

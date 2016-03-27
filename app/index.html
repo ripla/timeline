@@ -17,14 +17,14 @@
             src="bower_components/moment/locale/fi.js"></script>
 
     <link href="elements/elements.html" rel="import">
-
-
 </head>
 
 <body unresolved>
 <template is="dom-bind" id="app">
+
     <backend-service notes="{{notes}}"
-                     projects="{{projects}}"></backend-service>
+                     projects="{{projects}}"
+                     project-colors="{{projectColors}}"></backend-service>
 
     <paper-drawer-panel id="paperDrawerPanel">
 
@@ -51,7 +51,7 @@
             </paper-menu>
         </paper-scroll-header-panel>
 
-        <paper-scroll-header-panel main id="headerPanelMain">
+        <paper-scroll-header-panel main id="headerPanelMain" scroll-away-topbar no-reveal>
             <paper-toolbar id="mainToolbar" class="tall">
                 <div class="middle middle-container">
                     <div class="app-name">Project notes</div>
@@ -86,21 +86,16 @@
                                 Add note
                             </paper-button>
 
-                            <note-form></note-form>
+                            <note-form projects="[[projects]]"></note-form>
                         </paper-material>
                     </section>
 
                     <section data-route="projects" tabindex="-1">
                         <paper-material elevation="1">
                             <h1 class="page-title" tabindex="-1">Projects</h1>
-                            <iron-data-table items="[[projects]]">
-                                <data-table-column name="Id">
-                                    <template>[[item.projectId]]</template>
-                                </data-table-column>
-                                <data-table-column name="Name">
-                                    <template>[[item.name]]</template>
-                                </data-table-column>
-                            </iron-data-table>
+                            <project-table projects="{{projects}}"
+                                           project-colors="[[projectColors]]">
+                            </project-table>
                         </paper-material>
                     </section>
 

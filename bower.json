@@ -31,7 +31,8 @@
     "vaadin-date-picker": "^1.0.0-alpha2",
     "iron-data-table": "^1.0.0-alpha4",
     "vaadin-icons": "^1.0.0-alpha2",
-    "moment": "^2.12.0"
+    "moment": "^2.12.0",
+    "vaadin-combo-box": "^1.0.0-beta1"
   },
   "devDependencies": {
     "web-component-tester": "^4.0.0"

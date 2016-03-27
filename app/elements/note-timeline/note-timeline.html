@@ -3,7 +3,7 @@
 <dom-module id="project-timeline">
     <template>
         <vaadin-column-chart timeline id="timelineChart"
-                             on-point-click="_pointClicked" flex>
+                             on-point-click="_pointClicked">
             <chart animation="true"></chart>
 
             <title></title>
@@ -81,11 +81,13 @@
             listeners: {},
 
             attached: function () {
+                console.log('timeline attach');
                 if (this._isChartLoaded() && !this._notesLoaded) {
                     this.$.timelineChart.chart.showLoading();
                 }
 
                 this.async(function(){
+                    this.$
                     this.$.timelineChart.chart.reflow();
                 }, 1);
             },
@@ -260,7 +262,8 @@
                 if (noteSeries == null) {
                     noteSeries = chart.addSeries({
                         name: projectName,
-                        id: projectNameAsId
+                        id: projectNameAsId,
+                        color: newNote.project.color
                     }, redraw);
                 }
 
@@ -280,11 +283,11 @@
                     projectsAndNotes[note.project.name].push(notes[i]);
                 }
 
-                for (var project in projectsAndNotes) {
-                    if (projectsAndNotes.hasOwnProperty(project)) {
-                        var mappedData = this._mapBackendProjectData(projectsAndNotes[project]);
+                for (var projectName in projectsAndNotes) {
+                    if (projectsAndNotes.hasOwnProperty(projectName)) {
+                        var mappedData = this._mapBackendProjectData(projectsAndNotes[projectName]);
 
-                        var dsElement = this._createDataSeriesElement(project);
+                        var dsElement = this._createDataSeriesElement(projectsAndNotes[projectName][0].project);
                         var dataElement = this._createDataElement(mappedData);
                         Polymer.dom(chart).appendChild(dsElement);
                         Polymer.dom(dsElement).appendChild(dataElement);
@@ -341,10 +344,11 @@
              * @returns {Element} a new data-series element
              * @private
              */
-            _createDataSeriesElement: function (name) {
+            _createDataSeriesElement: function (project) {
                 var dsElement = document.createElement('data-series');
-                dsElement.setAttribute('id', this._getProjectNameAsId(name));
-                dsElement.setAttribute('name', name);
+                dsElement.setAttribute('id', this._getProjectNameAsId(project.name));
+                dsElement.setAttribute('name', project.name);
+                dsElement.setAttribute('color', project.color);
                 return dsElement;
             },
 

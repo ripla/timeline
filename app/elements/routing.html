@@ -25,6 +25,7 @@
         page('/timeline', function() {
             app.route = 'timeline';
             setFocus(app.route);
+            document.querySelector('#timelineChart').chart.reflow();
         });
 
         page('/projects', function() {

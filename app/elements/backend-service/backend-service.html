@@ -28,6 +28,8 @@
              * @typedef {Object} Project
              * @property {String} name The name of the project
              * @property {String} projectId the unique id of the project
+             * @property {String} color the color used for the project when
+             *                          displaying
              */
 
             /**
@@ -52,6 +54,16 @@
                     value: function () {
                         return [];
                     }
+                },
+
+                projectColors: {
+                    type: Array,
+                    readonly: true,
+                    notify: true,
+                    value: ["#3090F0", "#EC6464", "#98DF58", "#F9DD51", "#24DCD4",
+                        "#EC64A5", "#685CB0", "#FF7D42", "#336190", "#AA514D",
+                        "#7FB053", "#BBA85B", "#247981", "#963970", "#4B56A8",
+                        "#9A593D"]
                 }
             },
 
@@ -70,7 +82,8 @@
                 if (!this.projectExists(projectName)) {
                     var newProject = {
                         name: projectName,
-                        projectId: this._guid() //not really random, for testing
+                        projectId: this._guid(), //not really random, for testing
+                        color: this.projectColors[Math.floor(this.projectColors.length * Math.random())]
                     };
                     this.push('projects', newProject);
                     return newProject;
