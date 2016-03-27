@@ -52,4 +52,12 @@
         });
     });
 
+    app.scrollPageToTop = function() {
+        app.$.headerPanelMain.scrollToTop(true);
+    };
+
+    app.closeDrawer = function() {
+        app.$.paperDrawerPanel.closeDrawer();
+    };
+
 })(document);

@@ -8,12 +8,22 @@
             page.base(app.baseUrl.replace(/\/$/, ''));
         }
 
+        function scrollToTop(ctx, next) {
+            app.scrollPageToTop();
+            next();
+        }
+
+        function closeDrawer(ctx, next) {
+            app.closeDrawer();
+            next();
+        }
+
         function setFocus(selected){
             document.querySelector('section[data-route="' + selected + '"] .page-title').focus();
         }
 
         //for all page transitions
-        page('*', function(ctx, next) {
+        page('*', scrollToTop, closeDrawer, function(ctx, next) {
             next();
         });
 
