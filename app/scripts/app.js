@@ -20,6 +20,8 @@
         var timeline = document.querySelector('project-timeline');
         var form = document.querySelector('note-form');
         var backend = document.querySelector('backend-service');
+        var projectTable = document.querySelector('project-table');
+
         var addButton = document.querySelector('#add');
 
         addButton.addEventListener('click', function () {
@@ -49,6 +51,10 @@
             var pointObject = event.detail;
             form.editNote(pointObject.id, pointObject.project, pointObject.date, pointObject.note);
             addButton.style.display = 'none';
+        });
+
+        app.addEventListener("projects-changed", function(event){
+            console.log("Projects changed on app level");
         });
     });
 

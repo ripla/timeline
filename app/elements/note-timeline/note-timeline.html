@@ -1,51 +1,59 @@
 <link rel="import" href="../../bower_components/polymer/polymer.html">
 
 <dom-module id="project-timeline">
+    <style>
+        #timelineChart-container {
+            width: var(--project-timeline-chart-width);
+            height: var(--project-timeline-chart-height);
+        }
+    </style>
     <template>
-        <vaadin-column-chart timeline id="timelineChart"
-                             on-point-click="_pointClicked">
-            <chart animation="true"></chart>
+        <div id="timelineChart-container">
+            <vaadin-column-chart timeline id="timelineChart"
+                                 on-point-click="_pointClicked">
+                <chart animation="true"></chart>
 
-            <title></title>
+                <title></title>
 
-            <tooltip header-format=""
-                     point-formatter="function() {
+                <tooltip header-format=""
+                         point-formatter="function() {
                                     return '<span style=\'color:' + this.color + '\'>&#x25CF </span>'
                                     + '<b>Project: </b>' + this.series.name + '<br/>'
                                     + '<b> Note on ' + moment(this.x).format(moment.localeData().longDateFormat('L')) + ':</b><br/>'
                                     + '<span> ' + (this.name.length < 30 ? this.name : this.name.substring(0,30) + '...') + '</span>'
                                     + '<br/><br/>';}"
-                     use-html="true"
-                     x-date-format="%d.%m.%Y"></tooltip>
+                         use-html="true"
+                         x-date-format="%d.%m.%Y"></tooltip>
 
-            <legend enabled="true"></legend>
+                <legend enabled="true"></legend>
 
-            <x-axis type="datetime"
-                    min-tick-interval="86400000"
-                    crosshair="false">
-            </x-axis>
+                <x-axis type="datetime"
+                        min-tick-interval="86400000"
+                        crosshair="false">
+                </x-axis>
 
-            <y-axis visible="false"></y-axis>
+                <y-axis visible="false"></y-axis>
 
-            <plot-options>
-                <column point-width="15"></column>
-            </plot-options>
+                <plot-options>
+                    <column point-width="15"></column>
+                </plot-options>
 
-            <range-selector enabled="true"
-                            input-date-format="%d.%m.%Y"
-                            input-edit-date-format="%d.%m.%Y">
-            </range-selector>
+                <range-selector enabled="true"
+                                input-date-format="%d.%m.%Y"
+                                input-edit-date-format="%d.%m.%Y">
+                </range-selector>
 
-            <navigator>
-                <series line-width="0"
-                        type="line"
-                        id="navigator">
-                </series>
-            </navigator>
+                <navigator>
+                    <series line-width="0"
+                            type="line"
+                            id="navigator">
+                    </series>
+                </navigator>
 
-            <exporting enabled="false"></exporting>
+                <exporting enabled="false"></exporting>
 
-        </vaadin-column-chart>
+            </vaadin-column-chart>
+        </div>
     </template>
 
 
@@ -86,7 +94,7 @@
                     this.$.timelineChart.chart.showLoading();
                 }
 
-                this.async(function(){
+                this.async(function () {
                     this.$
                     this.$.timelineChart.chart.reflow();
                 }, 1);

@@ -6,7 +6,6 @@
         iron-data-table {
             font: 400 100%/1.5 Roboto, sans-serif;
             font-size: 13px;
-            font-weight: 400;
             line-height: 1.1;
             color: rgba(0, 0, 0, 0.87);
 
@@ -58,7 +57,7 @@
     </style>
 
     <template>
-        <iron-data-table items="[[projects]]"
+        <iron-data-table items="{{projects}}"
                          selection-enabled
                          selected-item="{{selectedProject}}">
             <data-table-column name="Name">
@@ -89,22 +88,29 @@
 
             properties: {
                 projects: {
-                    type: Array,
-                    notify: true
+                    type: Array
+                    /*notify: true,*/
+                  /*  observer:'_projectsChanged'*/
+
                 },
                 selectedProject: {
-                    type: Object,
-                    observer: '_selectionChanged'
+                    type: Object
+                    /*observer: '_selectionChanged'*/
                 },
                 projectColors: Array
             },
 
-            observers: [],
+            observers: [
+                /*'_projectsChanged(projects.*)'*/
+            ],
 
             listeners: {},
 
             _selectionChanged: function (event) {
                 console.log("Selected " + event);
+            },
+            _projectsChanged: function (event) {
+                console.log("ProjectsChanged " + event);
             }
         });
     </script>
