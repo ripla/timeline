@@ -1,0 +1,21 @@
+server:
+  port: 8888
+
+management:
+  context-path: /admin
+
+eureka:
+  instance:
+    leaseRenewalIntervalInSeconds: 10
+    statusPageUrlPath: /admin/info
+    healthCheckUrlPath: /admin/health
+  client:
+      serviceUrl:
+        defaultZone: http://localhost:9500/eureka/
+
+spring:
+  rabbitmq:
+    host: 192.168.99.100
+    port: 5672
+    username: guest
+    password: guest

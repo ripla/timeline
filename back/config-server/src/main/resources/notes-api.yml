@@ -1,0 +1,31 @@
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://localhost:9500/eureka/
+    instance:
+        leaseRenewalIntervalInSeconds: 5
+        statusPageUrlPath: /admin/info
+        healthCheckUrlPath: /admin/health
+    healthcheck:
+          enabled: true
+
+spring:
+  rabbitmq:
+    host: 192.168.99.100
+    port: 5672
+    username: guest
+    password: guest
+
+---
+spring:
+  profiles: node1
+
+server:
+  port: 9001
+
+---
+spring:
+  profiles: node2
+
+server:
+   port: 9002

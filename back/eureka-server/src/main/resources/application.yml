@@ -1,0 +1,44 @@
+server:
+  port: 9500
+
+management:
+  context-path: /admin
+
+eureka:
+  instance:
+    statusPageUrlPath: /admin/info
+    healthCheckUrlPath: /admin/health
+  client:
+    registerWithEureka: false
+    fetchRegistry: false
+  server:
+    waitTimeInMsWhenSyncEmpty: 0
+
+---
+spring:
+  profiles: peer1
+
+server:
+  port: 9500
+eureka:
+  instance:
+    hostname: localhost
+  client:
+    registerWithEureka: true
+    fetchRegistry: true
+    serviceUrl:
+      defaultZone: http://localhost:9501/eureka/
+
+---
+spring:
+  profiles: peer2
+server:
+  port: 9501
+eureka:
+  instance:
+    hostname: localhost
+  client:
+    registerWithEureka: true
+    fetchRegistry: true
+    serviceUrl:
+      defaultZone: http://localhost:9500/eureka/

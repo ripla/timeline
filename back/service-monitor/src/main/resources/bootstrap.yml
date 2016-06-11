@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: service-monitor
+  cloud:
+      config:
+        failFast: true
+        retry:
+          multiplier: 1.7
+          maxInterval: 10000
+
+management:
+  context-path: /admin

@@ -5,3 +5,5 @@
 node_modules
 app/bower_components
 dist
+front/app/bower_components
+.mvn
